@@ -12,6 +12,7 @@ dependencies = [
     "beautifulsoup4>=4.13.3",
     "click>=8.1.8",
     "pre-commit>=4.2.0",
+    "pyright>=1.1.398",
     "ruff>=0.11.4",
 ]
 
@@ -25,12 +26,26 @@ packages = ["covers_spreads"]
 [tool.ruff]
 # Simple core rules: errors, warnings, imports and basic style
 lint.select = ["E", "F", "I", "W"]
-line-length = 120
-target-version = "py313"
 
 # Allow autofix
 lint.fixable = ["ALL"]
+line-length = 120
+target-version = "py313"
 
 # Enable auto-formatting
 format.quote-style = "double"
 format.indent-style = "space"
+
+[tool.pyright]
+include = ["src"]
+exclude = [
+    "**/__pycache__",
+    "**/.mypy_cache",
+]
+typeCheckingMode = "strict"
+reportMissingTypeStubs = true
+reportUnknownMemberType = true
+reportUnknownArgumentType = true
+reportUnknownVariableType = true
+reportUnknownLambdaType = true
+reportUntypedFunctionDecorator = true
