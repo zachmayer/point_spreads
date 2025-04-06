@@ -2,25 +2,30 @@
 
 # Directory variables
 SRC_DIR := src/
+TEST_DIR := tests/
 
 # Automatically generate help text from comments
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: all ## Run all commands
-all: install check
+all: install check test
 
 .PHONY: fmt
 fmt: ## Run ruff formatter on all Python files
-	uv run ruff format $(SRC_DIR)
+	uv run ruff format $(SRC_DIR) $(TEST_DIR)
 
 .PHONY: lint
 lint: ## Run ruff linter with autofix (including unsafe fixes)
-	uv run ruff check --fix --unsafe-fixes $(SRC_DIR)
+	uv run ruff check --fix --unsafe-fixes $(SRC_DIR) $(TEST_DIR)
 
 .PHONY: types
 types: ## Run pyright type checker in strict mode
-	uv run pyright $(SRC_DIR)
+	uv run pyright $(SRC_DIR) $(TEST_DIR)
+
+.PHONY: test
+test: ## Run pytest on all test files
+	uv run pytest $(TEST_DIR)
 
 .PHONY: check
 check: fmt lint types ## Run all checks (format, lint, type checking)
