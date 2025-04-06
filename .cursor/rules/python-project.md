@@ -9,6 +9,9 @@
 ## Code Style
 
 - Readability > cleverness
+- Let specific errors propagate: never use `try...except`.
+- Minimize if/else - prefer early returns and maps
+- Minimize branching - flat code flows better
 - Functions: small, focused, typed, descriptively named
 - Skip abstractions for single-use code
 - Collocate related functionality
@@ -22,7 +25,10 @@
 ## Typing
 
 - No `# type: ignore` - fix root issues instead
-- Be precise with types - avoid Any
+- No `Any` - use precise types
+- Return declared type or fail fast
+- No `Optional[T]` or `None` unions as returns
+- Use `list`/`dict` not `typing.List`/`Dict`
 
 ## Documentation
 

@@ -63,29 +63,51 @@ def _parse_games(
 
     # Date Validation
     # If you ask for a date with no games, covers will return the closest date with games
-    # So we use this line to avoid duplicates from the cases where we've asked for non-game days
+    # This leads to duplicates, as multuiple "dates" will return the same day's games
+    # So we need to check the actual date on the page from covers
+    # 1. Extract the displayed date text from the page
     displayed_date_str = tree.xpath(f"string({displayed_date_xpath})").strip()
-    displayed_date = datetime.strptime(f"{displayed_date_str} {expected_date.year}", "%b %d %Y").date()
+    month_day = displayed_date_str.split()
+    month_abbr = month_day[0]
+    month_num = datetime.strptime(month_abbr, "%b").month
+
+    # 2. Extract years from the navigation links
+    iso_dates = tree.xpath('//a[contains(@href, "selectedDate=")]/@href')
+    years = {int(date.split("selectedDate=")[1][:4]) for date in iso_dates}
+
+    # 3. Determine the correct year from the navigation links
+    # None of these links are the current day: they show up to 3 days before/after today
+    # Except on certain days in Dec/Jan these will all be the same year
+    if len(years) == 1:  # Single year case (most common)
+        year = list(years)[0]
+    elif month_num == 12:  # December uses earlier year
+        year = min(years)
+    elif month_num == 1:  # January uses later year
+        year = max(years)
+
+    else:  # Unexpected case - should not happen
+        raise ValueError(f"Multiple years ({years}) for month {month_num}, expected only in Dec/Jan")
+
+    # 4. Construct full date and validate against expected
+    full_date_str = f"{displayed_date_str} {year}"
+    displayed_date = datetime.strptime(full_date_str, "%b %d %Y").date()
     if displayed_date != expected_date:
         return pd.DataFrame(columns=list(GameData.model_fields.keys()))
 
+    # Extract game data
     game_containers = tree.xpath(container_xpath)
-
     games: list[GameData] = []
     for container in game_containers:
-        # Extract data using provided XPaths - use string() for safety
         teams_text = container.xpath(f"string({teams_xpath})").strip()
         spread_text = container.xpath(f"string({spread_xpath})").strip()
         total_text = container.xpath(f"string({total_xpath})").strip()
 
-        # Process extracted strings
         away_team_raw, home_team_raw = teams_text.split("@")  # Assumes '@' separator; will raise error if not
         away_team = away_team_raw.strip()
         home_team = home_team_raw.strip()
         spread = spread_text.upper()
         total_cleaned = total_text.lower().replace("o/u ", "").replace("under ", "").replace("over ", "")
 
-        # Create GameData instance
         game_data = GameData(
             game_date=expected_date,
             update_date=date.today(),
@@ -96,7 +118,6 @@ def _parse_games(
         )
         games.append(game_data)
 
-    # Handle case where no games were found
     if not games:
         return pd.DataFrame(columns=list(GameData.model_fields.keys()))
 
@@ -110,15 +131,16 @@ def get_covers_games(game_date: date) -> pd.DataFrame:
     html_content = download_covers_html(game_date)
     today = date.today()
 
-    # XPath for the displayed date - seems consistent for both past and future
+    # XPath for the actual date on the page (may not match the requested date!)
     displayed_date_xpath = (
         "//div[@id='covers-CoversScoreboard-league-next-and-prev']"
         "/a[@class='navigation-anchor active isDailySport']"
         "/div[@class='date']"
     )
 
+    # Assume for today we're parsing the morning before the games start
+    # History pages vs future pages have a different format
     if game_date < today:
-        # Historical game XPaths
         container_xpath = '//article[contains(@class, "gamebox") and contains(@class, "postgamebox")]'
         teams_xpath = './/p[contains(@class, "gamebox-header")]/strong[@class="text-uppercase"]'
         spread_xpath = './/p[contains(@class, "summary-box")]/strong[1]'
@@ -127,21 +149,19 @@ def get_covers_games(game_date: date) -> pd.DataFrame:
             "or starts-with(normalize-space(text()), 'over ')]"
         )
     else:
-        # Future game XPaths
         container_xpath = '//article[contains(@class, "gamebox pregamebox")]'
         teams_xpath = './/p[@id="gamebox-header"]/strong[@class="text-uppercase"]'
         spread_xpath = './/span[contains(@class, "team-consensus")][2]/text()[normalize-space()]'
         total_xpath = './/span[contains(@class, "team-overunder")]'
-        # displayed_date_xpath is the same as historical
 
     return _parse_games(
         html_content,
-        expected_date=game_date,  # Pass original game_date as expected_date
+        expected_date=game_date,
         container_xpath=container_xpath,
         teams_xpath=teams_xpath,
         spread_xpath=spread_xpath,
         total_xpath=total_xpath,
-        displayed_date_xpath=displayed_date_xpath,  # Pass the new XPath
+        displayed_date_xpath=displayed_date_xpath,
     )
 
 
