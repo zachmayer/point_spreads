@@ -12,11 +12,11 @@ all: install check
 
 .PHONY: fmt
 fmt: ## Run ruff formatter on all Python files
-	ruff format $(SRC_DIR)
+	uv run ruff format $(SRC_DIR)
 
 .PHONY: lint
 lint: ## Run ruff linter with autofix (including unsafe fixes)
-	ruff check --fix --unsafe-fixes $(SRC_DIR)
+	uv run ruff check --fix --unsafe-fixes $(SRC_DIR)
 
 .PHONY: types
 types: ## Run pyright type checker in strict mode
