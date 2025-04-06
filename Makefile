@@ -27,7 +27,7 @@ check: fmt lint types ## Run all checks (format, lint, type checking)
 
 .PHONY: install
 install: ## Set up the project with dependencies and pre-commit hooks
-	uv pip install -e .
+	uv sync
 	uv run pre-commit install
 	uv run pre-commit install --hook-type pre-push
 
