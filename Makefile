@@ -27,15 +27,11 @@ check: fmt lint types ## Run all checks (format, lint, type checking)
 
 .PHONY: install
 install: ## Set up the project with dependencies and pre-commit hooks
-	uv sync
+	uv sync --upgrade
+	uv run pre-commit autoupdate
 	uv run pre-commit install
 	uv run pre-commit install --hook-type pre-push
 
 .PHONY: install-ci
 install-ci: ## Install dependencies from the lockfile for CI
 	uv sync --frozen
-
-.PHONY: update
-update: ## Update dependencies and pre-commit hooks
-	uv sync --upgrade
-	uv run pre-commit autoupdate
