@@ -1,6 +1,6 @@
 """Parser for Covers.com NCAA basketball HTML data."""
 
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 import requests
@@ -8,7 +8,6 @@ from lxml import html
 from pydantic import BaseModel
 
 
-# Pydantic model for game data
 class GameData(BaseModel):
     game_date: date
     update_date: date
@@ -16,7 +15,6 @@ class GameData(BaseModel):
     away_team: str
     spread: str
     total: str
-    neutral_site: bool
 
 
 def download_covers_html(game_date: date) -> str:
@@ -32,126 +30,138 @@ def download_covers_html(game_date: date) -> str:
     return response.text
 
 
-def parse_future_games(html_content: str, game_date: date) -> pd.DataFrame:
+def _parse_games(
+    html_content: str,
+    expected_date: date,
+    container_xpath: str,
+    teams_xpath: str,
+    spread_xpath: str,
+    total_xpath: str,
+    displayed_date_xpath: str,
+) -> pd.DataFrame:
     """
-    Parse future games from Covers.com HTML content.
+    Generic parser for Covers.com game data using provided XPaths.
+    Includes validation against the displayed date on the page.
+
+    Args:
+        html_content: HTML content as a string.
+        expected_date: Date of the games.
+        container_xpath: XPath to select the list of game container elements.
+        teams_xpath: XPath to extract the raw teams string (e.g., "Away @ Home")
+                     from within a game container. Requires string() wrapper.
+        spread_xpath: XPath to extract the raw spread string from within a
+                      game container. Requires string() wrapper.
+        total_xpath: XPath to extract the raw total string (e.g., "o/u 140.0",
+                     "under 145.5") from within a game container. Requires
+                     string() wrapper.
+        displayed_date_xpath: XPath to extract the displayed date string from the page.
+
+    Returns:
+        DataFrame containing game information.
     """
     tree = html.fromstring(html_content)
-    game_containers = tree.xpath('//article[contains(@class, "gamebox pregamebox")]')
+
+    # Date Validation
+    # If you ask for a date with no games, covers will return the closest date with games
+    # So we use this line to avoid duplicates from the cases where we've asked for non-game days
+    displayed_date_str = tree.xpath(f"string({displayed_date_xpath})").strip()
+    displayed_date = datetime.strptime(f"{displayed_date_str} {expected_date.year}", "%b %d %Y").date()
+    if displayed_date != expected_date:
+        return pd.DataFrame(columns=list(GameData.model_fields.keys()))
+
+    game_containers = tree.xpath(container_xpath)
 
     games: list[GameData] = []
     for container in game_containers:
-        teams_text = container.xpath('string(.//p[@id="gamebox-header"]/strong[@class="text-uppercase"])').strip()
-        away_team, home_team = [team.strip() for team in teams_text.split("@")]
+        # Extract data using provided XPaths - use string() for safety
+        teams_text = container.xpath(f"string({teams_xpath})").strip()
+        spread_text = container.xpath(f"string({spread_xpath})").strip()
+        total_text = container.xpath(f"string({total_xpath})").strip()
 
-        # Target the text node of the SECOND team-consensus span for the home spread
-        spread_text = container.xpath(
-            'string(.//span[contains(@class, "team-consensus")][2]/text()[normalize-space()])'
-        ).strip()
-        total_text = container.xpath('string(.//span[contains(@class, "team-overunder")])').strip()
-        total_text = total_text.lower().replace("o/u ", "")
-        neutral_site = "(N)" in container.xpath('string(.//p[@id="gamebox-header"])')
-
-        game_data = GameData(
-            game_date=game_date,
-            update_date=date.today(),
-            home_team=home_team,
-            away_team=away_team,
-            spread=spread_text,
-            total=total_text,
-            neutral_site=neutral_site,
-        )
-        games.append(game_data)
-
-    return pd.DataFrame([game.model_dump() for game in games])
-
-
-def parse_historical_games(html_content: str, game_date: date) -> pd.DataFrame:
-    """
-    Parse historical games from Covers.com HTML content
-    """
-    tree = html.fromstring(html_content)
-    game_containers = tree.xpath('//article[contains(@class, "gamebox") and contains(@class, "postgamebox")]')
-
-    # Use list of GameData model
-    games: list[GameData] = []
-
-    for container in game_containers:
-        header_text = container.xpath(
-            'string(.//p[contains(@class, "gamebox-header")]/strong[@class="text-uppercase"])'
-        ).strip()
-        away_team_raw, home_team_raw = header_text.split("@")
+        # Process extracted strings
+        away_team_raw, home_team_raw = teams_text.split("@")  # Assumes '@' separator; will raise error if not
         away_team = away_team_raw.strip()
         home_team = home_team_raw.strip()
-
-        spread_raw_text = container.xpath('string(.//p[contains(@class, "summary-box")]/strong[1])').strip()
-        spread = spread_raw_text.upper()
-
-        total_xpath = (
-            ".//p[contains(@class, 'summary-box')]/strong[starts-with(normalize-space(text()), 'under ') "
-            "or starts-with(normalize-space(text()), 'over ')]/text()"
-        )
-        total = container.xpath(total_xpath)[0].strip()
-        # Remove the prefix ("under " or "over ")
-        total = total.split(" ", 1)[-1]
-
-        # Extract neutral site info from header paragraph text content
-        header_full_text = container.xpath('string(.//p[contains(@class, "gamebox-header")])').lower()
-        neutral_site = "(n)" in header_full_text or "neutral" in header_full_text or "tournament" in header_full_text
+        spread = spread_text.upper()
+        total_cleaned = total_text.lower().replace("o/u ", "").replace("under ", "").replace("over ", "")
 
         # Create GameData instance
         game_data = GameData(
-            game_date=game_date,
+            game_date=expected_date,
             update_date=date.today(),
             home_team=home_team,
             away_team=away_team,
             spread=spread,
-            total=total,
-            neutral_site=neutral_site,
+            total=total_cleaned,
         )
         games.append(game_data)
 
-    # Ensure the DataFrame has the expected columns even if no games are found
+    # Handle case where no games were found
     if not games:
-        return pd.DataFrame(
-            columns=["game_date", "update_date", "home_team", "away_team", "spread", "total", "neutral_site"]
-        )
+        return pd.DataFrame(columns=list(GameData.model_fields.keys()))
 
-    # Create DataFrame from list of Pydantic models
     return pd.DataFrame([game.model_dump() for game in games])
 
 
 def get_covers_games(game_date: date) -> pd.DataFrame:
     """
     Get games for a specific date from Covers.com.
-
-    Args:
-        game_date: Date to get games for
-
-    Returns:
-        DataFrame containing game information
     """
-    # Download HTML content
     html_content = download_covers_html(game_date)
-
-    # Choose the appropriate parser based on the date
     today = date.today()
+
+    # XPath for the displayed date - seems consistent for both past and future
+    displayed_date_xpath = (
+        "//div[@id='covers-CoversScoreboard-league-next-and-prev']"
+        "/a[@class='navigation-anchor active isDailySport']"
+        "/div[@class='date']"
+    )
+
     if game_date < today:
-        return parse_historical_games(html_content, game_date)
+        # Historical game XPaths
+        container_xpath = '//article[contains(@class, "gamebox") and contains(@class, "postgamebox")]'
+        teams_xpath = './/p[contains(@class, "gamebox-header")]/strong[@class="text-uppercase"]'
+        spread_xpath = './/p[contains(@class, "summary-box")]/strong[1]'
+        total_xpath = (
+            ".//p[contains(@class, 'summary-box')]/strong[starts-with(normalize-space(text()), 'under ') "
+            "or starts-with(normalize-space(text()), 'over ')]"
+        )
     else:
-        return parse_future_games(html_content, game_date)
+        # Future game XPaths
+        container_xpath = '//article[contains(@class, "gamebox pregamebox")]'
+        teams_xpath = './/p[@id="gamebox-header"]/strong[@class="text-uppercase"]'
+        spread_xpath = './/span[contains(@class, "team-consensus")][2]/text()[normalize-space()]'
+        total_xpath = './/span[contains(@class, "team-overunder")]'
+        # displayed_date_xpath is the same as historical
+
+    return _parse_games(
+        html_content,
+        expected_date=game_date,  # Pass original game_date as expected_date
+        container_xpath=container_xpath,
+        teams_xpath=teams_xpath,
+        spread_xpath=spread_xpath,
+        total_xpath=total_xpath,
+        displayed_date_xpath=displayed_date_xpath,  # Pass the new XPath
+    )
 
 
-# Example usage within this script
 if __name__ == "__main__":
     past_date = date(2023, 3, 8)
     print(f"--- Parsing Historical Example ({past_date}) ---")
-    html_past = download_covers_html(past_date)
-    historical_games_df = parse_historical_games(html_past, past_date)
+    historical_games_df = get_covers_games(past_date)
     print(historical_games_df)
 
-    future_date = date(2025, 4, 7)
+    future_date = date(2025, 4, 6)
     print(f"\n--- Parsing Future Example ({future_date}) ---")
-    html_future = download_covers_html(future_date)
-    future_games_df = parse_future_games(html_future, future_date)
+    future_games_df = get_covers_games(future_date)
+    print(future_games_df)
+
+    past_date = date(2020, 7, 4)
+    print(f"--- Parsing Historical Example with no games ({past_date}) ---")
+    historical_games_df = get_covers_games(past_date)
+    print(historical_games_df)
+
+    future_date = date(2025, 7, 4)
+    print(f"\n--- Parsing Future Example with no games ({future_date}) ---")
+    future_games_df = get_covers_games(future_date)
     print(future_games_df)
