@@ -165,6 +165,7 @@ def get_covers_games(game_date: date) -> pd.DataFrame:
     )
 
 
+# A few simple tests of the parser
 if __name__ == "__main__":
     past_date = date(2023, 3, 8)
     print(f"--- Parsing Historical Example ({past_date}) ---")
