@@ -37,5 +37,5 @@ install-ci: ## Install dependencies from the lockfile for CI
 
 .PHONY: update
 update: ## Update dependencies and pre-commit hooks
-	uv pip install -e . --upgrade
+	uv sync --upgrade
 	uv run pre-commit autoupdate
