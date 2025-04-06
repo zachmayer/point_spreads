@@ -1,10 +1,10 @@
-# Covers Spreads
+# Point Spreads
 
-Historical data of college basketball spreads
+Historical data for men's college basketball point spreads and totals
 
 ## Project Structure
 
-- **Code**: [`src/covers_spreads/`](src/covers_spreads/)
+- **Code**: [`src/point_spreads/`](src/point_spreads/)
 - **Data**: [`data/`](data/)
 
 ## Development

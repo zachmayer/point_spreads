@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "covers-spreads"
+name = "point-spreads"
 version = "0.1.0"
 description = "Historical data of college basketball spreads"
 readme = "README.md"
@@ -17,11 +17,11 @@ dependencies = [
 ]
 
 [project.scripts]
-covers-spreads = "covers_spreads.main:main"
+point-spreads = "point_spreads.main:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-packages = ["covers_spreads"]
+packages = ["point_spreads"]
 
 [tool.ruff]
 # Simple core rules: errors, warnings, imports and basic style
