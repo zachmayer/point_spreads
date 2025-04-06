@@ -32,8 +32,8 @@ install: ## Set up the project with dependencies and pre-commit hooks
 	uv run pre-commit install --hook-type pre-push
 
 .PHONY: install-ci
-install-ci: ## Install dependencies from the frozen lock file for CI
-	uv pip install -e . --constraints=requirements.lock
+install-ci: ## Install dependencies from the lockfile for CI
+	uv pip install -e . --frozen
 
 .PHONY: update
 update: ## Update dependencies and pre-commit hooks
