@@ -125,8 +125,8 @@ def _parse_games(
     games: list[GameData] = []
     for container in game_containers:
         teams_text = container.xpath(f"string({teams_xpath})").strip()
-        spread_text = container.xpath(f"string({spread_xpath})").strip()
-        total_text = container.xpath(f"string({total_xpath})").strip()
+        spread_text = container.xpath(f"string({spread_xpath})").strip().lower()
+        total_text = container.xpath(f"string({total_xpath})").strip().lower()
 
         if "@" not in teams_text:
             raise ValueError(f"Missing '@' separator in teams text: '{teams_text}'")
