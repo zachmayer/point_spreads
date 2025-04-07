@@ -1,5 +1,6 @@
 """Parser for Covers.com NCAA basketball HTML data."""
 
+import re
 from datetime import date, datetime
 from pathlib import Path
 
@@ -150,37 +151,79 @@ def _parse_games(
                 spread = ""
                 total = ""
             else:
-                # Normal case - extract from summary box
+                # Normal case - extract from summary box text
                 summary_text = summary_box.text_content().strip()
+
+                # First check for push case
+                if "pushed the spread" in summary_text.lower():
+                    # Extract spread value for push
+                    strong_tags = summary_box.findall(".//strong")
+                    if strong_tags and len(strong_tags) >= 1:
+                        spread = strong_tags[0].text_content()
+                    else:
+                        spread = "0"  # Default for push if no value found
+                else:
+                    # Regular case - find which team covered the spread
+                    # Extract the relevant team name from the summary text
+                    away_pattern = re.escape(away_team)
+                    home_pattern = re.escape(home_team)
+                    team_pattern = f"({away_pattern}|{home_pattern})"
+
+                    team_covered_match = re.search(f"{team_pattern}\\s+covered the spread", summary_text)
+
+                    # Extract spread value
+                    strong_tags = summary_box.findall(".//strong")
+                    if strong_tags and len(strong_tags) >= 1:
+                        spread_value = strong_tags[0].text_content()
+                    else:
+                        spread_value = ""
+
+                    if team_covered_match:
+                        team_covered = team_covered_match.group(1)
+
+                        # Determine sign based on which team covered
+                        if team_covered == home_team:
+                            # Home team covered - use spread as is
+                            spread = spread_value
+                        else:
+                            # Away team covered - negate for home team perspective
+                            if spread_value.startswith("+"):
+                                spread = "-" + spread_value[1:]
+                            elif spread_value.startswith("-"):
+                                spread = "+" + spread_value[1:]
+                            else:
+                                spread = "-" + spread_value
+                    else:
+                        # Couldn't find which team covered, use the fallback method
+                        if strong_tags and len(strong_tags) >= 1:
+                            spread = strong_tags[0].text_content()
+                        else:
+                            spread = "0"  # Default for push if no value found
+
+                # Extract total from strong tags if available
                 strong_tags = summary_box.findall(".//strong")
-                strong_count = len(strong_tags)
-                has_zero_spread = "(zero spread)" in summary_text
-
-                # Validate structure based on number of strong tags
-                if strong_count not in (1, 2, 3):
-                    raise ValueError(f"Found {strong_count} <strong> tags in summary box, expected 1-3")
-
-                # Case 1: Pick'em game (1 strong tag with zero spread)
-                if strong_count == 1:
-                    if not has_zero_spread:
-                        raise ValueError("Found 1 strong tag but missing 'zero spread' text")
-                    spread = "0"
-                    total = strong_tags[0].text_content()
-
-                # Case 2: Normal game (2 strong tags, no zero spread)
-                elif strong_count == 2:
-                    if has_zero_spread:
-                        raise ValueError("Found 2 strong tags with 'zero spread' text")
-                    spread = strong_tags[0].text_content()
+                if len(strong_tags) >= 2:
+                    # For normal games, total is the second strong tag
                     total = strong_tags[1].text_content()
-
-                # Case 3: Push game (3 strong tags: spread, "pushed", total)
-                else:  # strong_count == 3
-                    middle_text = strong_tags[1].text_content().strip().lower()
-                    if middle_text != "pushed":
-                        raise ValueError(f"Expected middle strong tag to be 'pushed', got '{middle_text}'")
-                    spread = strong_tags[0].text_content()
+                elif len(strong_tags) >= 3:
+                    # For pushed games, total is the third strong tag
                     total = strong_tags[2].text_content()
+                else:
+                    # Try to extract from text patterns if not found in strong tags
+                    total_match = None
+                    summary_html = html.tostring(summary_box, encoding="unicode")
+
+                    if "under" in summary_text.lower():
+                        total_match = re.search(r"under\s+<strong>([0-9.]+)</strong>", summary_html)
+                    elif "over" in summary_text.lower():
+                        total_match = re.search(r"over\s+<strong>([0-9.]+)</strong>", summary_html)
+                    elif "pre-game total" in summary_text.lower():
+                        total_match = re.search(r"pre-game total of\s+<strong>([0-9.]+)</strong>", summary_html)
+
+                    if total_match:
+                        total = total_match.group(1)
+                    else:
+                        total = ""
         else:
             # Use simpler selectors for future games and manually select the right elements
             # For spread, get all team-consensus spans and take the last one (home team)

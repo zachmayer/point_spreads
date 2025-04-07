@@ -16,6 +16,30 @@ MONTHLY_THRESHOLDS = {
     3: 0.15,
     4: 0.00,
 }
+# Remove duplicates (like Florida St./Florida State) and standardize names
+MAJOR_TEAMS = [
+    "Auburn",
+    "Houston",
+    "Duke",
+    "North Carolina",
+    "Kentucky",
+    "Kansas",
+    "UCLA",
+    "Gonzaga",
+    "Villanova",
+    "Baylor",
+    "Virginia",
+    "Connecticut",
+    "Louisville",
+    "Syracuse",
+    "Arizona",
+    "Florida",
+    "Texas",
+    "Texas Tech",
+    "Purdue",
+    "Wisconsin",
+    "Tennessee",
+]
 
 
 def get_test_data() -> pl.DataFrame:
@@ -226,19 +250,78 @@ def test_year_over_year_consistency() -> None:
 
 
 @pytest.mark.parametrize("year", TEST_YEARS)
-@pytest.mark.parametrize("team", ["Duke", "North Carolina", "Kentucky", "Kansas", "UCLA", "Gonzaga"])
+@pytest.mark.parametrize("team", MAJOR_TEAMS)
 def test_major_team_coverage(year: int, team: str) -> None:
     """Test that major teams have at least 20 spreads per year consistently."""
     df = get_test_data()
 
     # Count games with spreads for team in specific year
-    team_data = df.filter(
-        ((pl.col("home_team").str.contains(team)) | (pl.col("away_team").str.contains(team))) & (pl.col("year") == year)
-    )
+    # Use exact matching rather than contains
+    team_data = df.filter(((pl.col("home_team") == team) | (pl.col("away_team") == team)) & (pl.col("year") == year))
 
     games_with_spreads = team_data.filter(pl.col("spread").is_not_null()).height
 
     assert games_with_spreads >= 20, f"{team} has only {games_with_spreads} spreads in {year} (<20)"
+
+    # Check spread values are reasonable
+    team_with_spreads = team_data.filter(pl.col("spread").is_not_null())
+
+    # Known special matchups where one major team might be significantly worse
+    # than another in specific years
+    special_matchups = {
+        # Format: ((team1, team2), [years where a significant spread is reasonable])
+        # Duke vs UNC or Kentucky vs Auburn can have big spreads in certain years
+        (("Duke", "North Carolina"), range(2011, 2025)),
+        (("North Carolina", "Duke"), range(2011, 2025)),
+        (("Kentucky", "Auburn"), range(2011, 2018)),  # Kentucky dominated this matchup for years
+        (("Auburn", "Kentucky"), range(2019, 2025)),  # Auburn improved in recent years
+    }
+
+    for row in team_with_spreads.iter_rows(named=True):
+        home_team = row["home_team"]
+        away_team = row["away_team"]
+        spread = float(row["spread"])
+        game_date = row["game_date"]
+
+        # Determine if the team is home or away
+        is_home = home_team == team
+
+        # Get standardized opponent name
+        opponent = away_team if is_home else home_team
+
+        # Normalize the spread to be from the perspective of our team
+        # Positive value = team is unfavored, Negative value = team is favored
+        team_spread = spread if is_home else -spread
+
+        # Is this a major vs major matchup?
+        vs_major = opponent in MAJOR_TEAMS
+
+        # Is this a special matchup from our exception list?
+        is_special_matchup = False
+        for (team1, team2), years in special_matchups:
+            if team == team1 and opponent == team2 and year in years:
+                is_special_matchup = True
+                break
+
+        # Major teams should never be huge underdogs (large positive spread)
+        # Different thresholds for different scenarios:
+        if vs_major:
+            if is_special_matchup:
+                # Special rivalry games - allow up to 20 point differences
+                assert team_spread < 20, (
+                    f"{team} has unreasonable spread (+{team_spread}) vs rival {opponent} on {game_date}"
+                )
+            else:
+                # Regular major vs major - no team should be more than 15 point underdogs
+                assert team_spread < 15, (
+                    f"{team} has unreasonable spread (+{team_spread}) vs major team {opponent} on {game_date}"
+                )
+        else:
+            # Major teams should never be underdogs by more than 15 points against non-major teams
+            # This accounts for outlier matchups in early season tournaments or NIT/tournaments
+            assert team_spread < 15, (
+                f"{team} has unreasonable spread (+{team_spread}) vs non-major team {opponent} on {game_date}"
+            )
 
 
 @pytest.mark.parametrize("year", TEST_YEARS)
