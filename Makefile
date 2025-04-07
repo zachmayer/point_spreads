@@ -9,7 +9,7 @@ help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: all ## Run all commands
-all: install check test
+all: install check test test-parser-specific-days
 
 .PHONY: fmt
 fmt: ## Run ruff formatter on all Python files
@@ -23,9 +23,13 @@ lint: ## Run ruff linter with autofix (including unsafe fixes)
 types: ## Run pyright type checker in strict mode
 	uv run pyright $(SRC_DIR) $(TEST_DIR)
 
-.PHONY: test
+.PHONY:test
 test: ## Run pytest on all test files
 	uv run pytest $(TEST_DIR)
+
+.PHONY: test-parser-specific-days
+test-parser-specific-days: ## Run covers_parser module as integration test
+	uv run -m point_spreads.covers_parser
 
 .PHONY: check
 check: fmt lint types ## Run all checks (format, lint, type checking)

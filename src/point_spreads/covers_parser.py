@@ -115,6 +115,11 @@ def _parse_games(
     for container in containers:
         container_class = container.get("class", "")
         is_postgame = "postgamebox" in container_class
+        is_historical = expected_date < date.today()
+
+        # Sanity check: future games should not have post-game boxes
+        if not is_historical and is_postgame:
+            raise ValueError(f"Future game on {expected_date} has a post-game box, which should be impossible")
 
         teams_text = container.xpath(f"string({teams_xpath})").strip()
         if "@" not in teams_text:
@@ -125,13 +130,23 @@ def _parse_games(
         home_team = home_team_raw.strip()
 
         # Use different XPaths based on container type
-        if is_postgame:
+        if is_postgame or is_historical:
+            # Check if the game was canceled (both teams have a dash "-" for their score)
+            score_xpath = './/div[contains(@class, "gamebox-score")]'
+            away_score = container.xpath(f"{score_xpath}[1]//text()")
+            home_score = container.xpath(f"{score_xpath}[2]//text()")
+
+            # Game canceled if both scores exist and are "-"
+            is_canceled = away_score and away_score[0].strip() == "-" and home_score and home_score[0].strip() == "-"
+
             # Historical games: Extract from summary box
             summary_box = container.find('.//p[@class="m-0 summary-box border rounded py-2 pe-2 ps-5"]')
 
-            # Handle "bets off" case - when there is no summary box
-            if summary_box is None:
-                # Bets are off - use empty strings for spread and total
+            # Handle cases where we use empty strings for spread and total:
+            # 1. Game was canceled (both scores are "-")
+            # 2. "Bets off" case (no summary box)
+            if is_canceled or summary_box is None:
+                # Game was canceled or bets are off - use empty strings for spread and total
                 spread = ""
                 total = ""
             else:
@@ -246,3 +261,8 @@ if __name__ == "__main__":
     print(f"\n--- Parsing Future Example with no games ({future_date}) ---")
     future_games_df = get_covers_games(future_date)
     print(future_games_df)
+
+    past_date = date(2020, 11, 25)
+    print(f"--- Parsing Historical Example With Canceled Games ({past_date}) ---")
+    historical_games_df = get_covers_games(past_date)
+    print(historical_games_df)
