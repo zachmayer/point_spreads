@@ -1,15 +1,10 @@
 # Python Development Rules
 
-## Build & Package Management
-
-- Prefer `make` targets for all operations - use Makefile automation
-- When direct commands needed: use `uv` exclusively (`uv add`, `uv run`)
-- Version-pin all dependencies
-
 ## Code Style
 
 - Readability > cleverness
-- Let specific errors propagate: never use `try...except`.
+- Let specific errors propagate: never use `try...except`
+- Avoid error handling — type errors should propagate
 - Minimize if/else - prefer early returns and maps
 - Minimize branching - flat code flows better
 - Functions: small, focused, typed, descriptively named
@@ -17,6 +12,12 @@
 - Don't add excessive, defensive, or unnecessary early return cases
 - Collocate related functionality
 - 120 char line limit
+
+## Build & Package Management
+
+- Prefer `make` targets for all operations - use Makefile automation
+- When direct commands needed: use `uv` exclusively (`uv add`, `uv run`)
+- Version-pin all dependencies
 
 ## Typing
 

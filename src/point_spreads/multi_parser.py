@@ -26,7 +26,11 @@ def get_covers_games_for_dates(dates: list[date]) -> pl.DataFrame:
 
     # Get game data for each date
     dataframes: list[pl.DataFrame] = []
-    for game_date in tqdm(filtered_dates, desc="Fetching game data"):
+
+    # Create progress bar that will display the current date being processed
+    progress_bar = tqdm(filtered_dates, desc="Fetching game data")
+    for game_date in progress_bar:
+        progress_bar.set_description(f"Processing {game_date.isoformat()}")
         games_df = get_covers_games(game_date)
         dataframes.append(games_df)
 
@@ -54,19 +58,23 @@ def main() -> None:
     # Filter for records where game_date is >= updated_date - 1
     filtered_df = df.filter(pl.col("game_date") >= pl.col("updated_date") - timedelta(days=1))
 
-    # Start with existing dates from the DataFrame
-    existing_dates = filtered_df.select("game_date").to_series().dt.date().unique().to_list()
-
-    # Create a set for uniqueness
+    # Start with existing dates from the DataFrame and convert to Python dates
+    existing_dates = [d.date() for d in filtered_df.get_column("game_date").unique()]
     dates_set: set[date] = set(existing_dates)
 
-    # Add today and 7 days into the future
+    # Generate date range from min(today, last game date) to today + 8 days
+    last_game_date = max(existing_dates)
     today = datetime.now().date()
-    for i in range(0, 8):
-        future_date = today + timedelta(days=i)
-        dates_set.add(future_date)
+    start_date = min(last_game_date, today)
+    end_date = today + timedelta(days=8)
 
-    # Sort the dates
+    # Add all these days to our set
+    current_date = start_date
+    while current_date <= end_date:
+        dates_set.add(current_date)
+        current_date += timedelta(days=1)
+
+    # Convert back from a set to a sorted list
     dates_list = sorted(list(dates_set))
 
     # Get game data for these dates
