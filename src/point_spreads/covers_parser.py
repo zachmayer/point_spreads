@@ -182,18 +182,25 @@ def _parse_games(
                     spread = strong_tags[0].text_content()
                     total = strong_tags[2].text_content()
         else:
-            # Use exact attribute selectors instead of contains()
-            spread_xpath = './/span[@class="team-consensus"]'
-            total_xpath = './/span[@class="team-overunder"]'
+            # Use simpler selectors for future games and manually select the right elements
+            # For spread, get all team-consensus spans and take the last one (home team)
+            spread_elements = container.xpath('.//span[contains(@class, "team-consensus")]')
+            total_element = container.xpath('.//span[contains(@class, "team-overunder")]')
 
-            spread_element = container.find(spread_xpath)
-            total_element = container.find(total_xpath)
+            if not spread_elements or not total_element:
+                raise ValueError(f"Missing elements: {home_team} vs {away_team} on {expected_date}")
 
-            if spread_element is None or total_element is None:
-                raise ValueError(f"Missing spread or total element for pregame {home_team} vs {away_team}")
+            # The second team-consensus span is for the home team (right side)
+            if len(spread_elements) >= 2:
+                spread_element = spread_elements[1]  # Home team (right side) spread
+                # Get only the text node content without any child elements
+                spread_text = spread_element.text or ""
+                # Clean and extract just the numeric part with sign
+                spread = spread_text.strip()
+            else:
+                raise ValueError(f"Insufficient spread elements: {home_team} vs {away_team} on {expected_date}")
 
-            spread = spread_element.text_content()
-            total = total_element.text_content()
+            total = total_element[0].text_content()
 
         # Unified cleaning logic for both paths - only clean if not empty
         if spread:
@@ -247,11 +254,6 @@ if __name__ == "__main__":
     historical_games_df = get_covers_games(past_date)
     print(historical_games_df)
 
-    future_date = date(2025, 4, 6)
-    print(f"\n--- Parsing Future Example ({future_date}) ---")
-    future_games_df = get_covers_games(future_date)
-    print(future_games_df)
-
     past_date = date(2020, 7, 4)
     print(f"--- Parsing Historical Example with no games ({past_date}) ---")
     historical_games_df = get_covers_games(past_date)
@@ -266,3 +268,8 @@ if __name__ == "__main__":
     print(f"--- Parsing Historical Example With Canceled Games ({past_date}) ---")
     historical_games_df = get_covers_games(past_date)
     print(historical_games_df)
+
+    future_date = date(2025, 4, 7)
+    print(f"\n--- Parsing Future Example ({future_date}) ---")
+    future_games_df = get_covers_games(future_date)
+    print(future_games_df)
