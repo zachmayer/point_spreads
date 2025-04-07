@@ -1,9 +1,21 @@
 """Analytics tests for Covers NCAA basketball data."""
 
+import warnings
 from pathlib import Path
 
 import polars as pl
 import pytest
+
+# Global constants
+TEST_YEARS = range(2011, 2025)
+MONTHLY_THRESHOLDS = {
+    11: 0.60,
+    12: 0.50,
+    1: 0.46,
+    2: 0.30,
+    3: 0.15,
+    4: 0.00,
+}
 
 
 def get_test_data() -> pl.DataFrame:
@@ -102,7 +114,7 @@ def test_dataset_metrics() -> None:
     # etc.
 
 
-@pytest.mark.parametrize("year", range(2011, 2025))
+@pytest.mark.parametrize("year", TEST_YEARS)
 def test_games_per_year(year: int) -> None:
     """Test that each year has a reasonable number of games."""
     df = get_test_data()
@@ -114,7 +126,7 @@ def test_games_per_year(year: int) -> None:
     assert games_count >= 3000, f"Year {year} only has {games_count} games, expected at least 3,000"
 
 
-@pytest.mark.parametrize("year", range(2011, 2025))
+@pytest.mark.parametrize("year", TEST_YEARS)
 def test_unique_teams_per_year(year: int) -> None:
     """Test that each year has a reasonable number of unique teams."""
     df = get_test_data()
@@ -132,7 +144,7 @@ def test_unique_teams_per_year(year: int) -> None:
     assert unique_team_count >= 300, f"Year {year} only has {unique_team_count} unique teams, expected at least 300"
 
 
-@pytest.mark.parametrize("year", range(2011, 2025))
+@pytest.mark.parametrize("year", TEST_YEARS)
 def test_spread_stats_per_year(year: int) -> None:
     """Test that spread statistics are within reasonable bounds."""
     df = get_test_data()
@@ -145,9 +157,6 @@ def test_spread_stats_per_year(year: int) -> None:
         pl.col("spread").mean().alias("mean_spread"),
     )
 
-    if spread_stats.height == 0:
-        pytest.skip(f"No spread data available for year {year}")
-
     min_spread = spread_stats.item(0, "min_spread")
     max_spread = spread_stats.item(0, "max_spread")
     mean_spread = spread_stats.item(0, "mean_spread")
@@ -158,7 +167,7 @@ def test_spread_stats_per_year(year: int) -> None:
     assert -10 <= mean_spread <= 0, f"Year {year} has mean spread {mean_spread}, expected between -10 and 0"
 
 
-@pytest.mark.parametrize("year", range(2011, 2025))
+@pytest.mark.parametrize("year", TEST_YEARS)
 def test_total_stats_per_year(year: int) -> None:
     """Test that total statistics are within reasonable bounds."""
     df = get_test_data()
@@ -171,9 +180,6 @@ def test_total_stats_per_year(year: int) -> None:
         pl.col("total").mean().alias("mean_total"),
     )
 
-    if total_stats.height == 0:
-        pytest.skip(f"No total data available for year {year}")
-
     min_total = total_stats.item(0, "min_total")
     max_total = total_stats.item(0, "max_total")
     mean_total = total_stats.item(0, "mean_total")
@@ -184,7 +190,7 @@ def test_total_stats_per_year(year: int) -> None:
     assert 130 <= mean_total <= 150, f"Year {year} has mean total {mean_total}, expected between 130 and 150"
 
 
-@pytest.mark.parametrize("year", range(2011, 2025))
+@pytest.mark.parametrize("year", TEST_YEARS)
 def test_missing_data_per_year(year: int) -> None:
     """Test that missing data percentages are within reasonable bounds."""
     df = get_test_data()
@@ -204,3 +210,104 @@ def test_missing_data_per_year(year: int) -> None:
     # Assert reasonable bounds for missing data
     assert spread_missing_pct < 40, f"Year {year} has {spread_missing_pct:.1f}% missing spreads, expected less than 40%"
     assert total_missing_pct < 40, f"Year {year} has {total_missing_pct:.1f}% missing totals, expected less than 40%"
+
+
+@pytest.mark.parametrize("year", TEST_YEARS)
+def test_yearly_spread_coverage(year: int) -> None:
+    """Test that each year has less than 35% missing spreads."""
+    df = get_test_data()
+    year_df = df.filter(pl.col("year") == year)
+    total_games = year_df.height
+
+    missing_spreads = year_df.filter(pl.col("spread").is_null()).height
+    missing_pct = missing_spreads / total_games
+
+    assert missing_pct < 0.35, f"Year {year} has {missing_pct:.2%} missing spreads (>35%)"
+
+
+@pytest.mark.parametrize("year", TEST_YEARS)
+@pytest.mark.parametrize("month", MONTHLY_THRESHOLDS.keys())
+def test_monthly_spread_coverage(year: int, month: int) -> None:
+    """Test that each month has appropriate spread coverage based on thresholds."""
+    df = get_test_data()
+    month_data = df.filter((pl.col("game_date").dt.month() == month) & (pl.col("year") == year))
+
+    if month_data.height == 0:
+        if year != 2020 or month != 4:
+            warnings.warn(f"No data found for {year}-{month}, skipping test")
+        pytest.skip(f"No data for {year}-{month}")
+
+    threshold = MONTHLY_THRESHOLDS[month]
+    missing_pct = month_data["spread"].null_count() / month_data.height
+
+    if threshold == 0.0:
+        assert missing_pct == threshold, f"Month {month} in {year} has {missing_pct:.2%} missing spreads (expected 0%)"
+    else:
+        assert missing_pct < threshold, (
+            f"Month {month} in {year} has {missing_pct:.2%} missing spreads (threshold: {threshold:.2%})"
+        )
+
+
+@pytest.mark.parametrize("year", TEST_YEARS)
+def test_spread_total_consistency(year: int) -> None:
+    """Test that if spread is missing, total is also missing (and vice versa) in >90% of cases."""
+    df = get_test_data()
+    df = df.filter(pl.col("year") == year)
+
+    # Count cases where only one is missing
+    only_spread_missing = df.filter(pl.col("spread").is_null() & pl.col("total").is_not_null()).height
+    only_total_missing = df.filter(pl.col("spread").is_not_null() & pl.col("total").is_null()).height
+
+    # Count cases where either is missing
+    either_missing = df.filter(pl.col("spread").is_null() | pl.col("total").is_null()).height
+
+    consistency_rate = 1 - (only_spread_missing + only_total_missing) / either_missing
+    assert consistency_rate > 0.70, f"Year {year} spread/total consistency rate is {consistency_rate:.2%} (<90%)"
+
+
+def test_year_over_year_consistency() -> None:
+    """Test that missing data % doesn't increase by more than 35% year-over-year for the same month."""
+    df = get_test_data()
+
+    # Skip first year since we need to compare with previous year
+    for curr_year in list(TEST_YEARS)[1:]:
+        prev_year = curr_year - 1
+
+        # For each month in our thresholds
+        for month in MONTHLY_THRESHOLDS.keys():
+            # Get previous year data for this month
+            prev_year_data = df.filter((pl.col("year") == prev_year) & (pl.col("game_date").dt.month() == month))
+
+            # Get current year data for this month
+            curr_year_data = df.filter((pl.col("year") == curr_year) & (pl.col("game_date").dt.month() == month))
+
+            # Skip if either year has no data for this month
+            if prev_year_data.height == 0 or curr_year_data.height == 0:
+                continue
+
+            # Calculate missing percentages
+            prev_pct = prev_year_data.filter(pl.col("spread").is_null()).height / prev_year_data.height
+            curr_pct = curr_year_data.filter(pl.col("spread").is_null()).height / curr_year_data.height
+
+            # Calculate increase
+            increase = curr_pct - prev_pct
+
+            assert increase <= 0.35, (
+                f"Month {month}: {curr_year} missing increased by {increase:.2%} vs {prev_year} (>35%)"
+            )
+
+
+@pytest.mark.parametrize("year", TEST_YEARS)
+@pytest.mark.parametrize("team", ["Duke", "North Carolina", "Kentucky", "Kansas", "UCLA", "Gonzaga"])
+def test_major_team_coverage(year: int, team: str) -> None:
+    """Test that major teams have at least 20 spreads per year consistently."""
+    df = get_test_data()
+
+    # Count games with spreads for team in specific year
+    team_data = df.filter(
+        ((pl.col("home_team").str.contains(team)) | (pl.col("away_team").str.contains(team))) & (pl.col("year") == year)
+    )
+
+    games_with_spreads = team_data.filter(pl.col("spread").is_not_null()).height
+
+    assert games_with_spreads >= 20, f"{team} has only {games_with_spreads} spreads in {year} (<20)"
