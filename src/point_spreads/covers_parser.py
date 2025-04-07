@@ -1,6 +1,7 @@
 """Parser for Covers.com NCAA basketball HTML data."""
 
 from datetime import date, datetime
+import re
 from pathlib import Path
 
 import polars as pl
@@ -134,7 +135,11 @@ def _parse_games(
         away_team_raw, home_team_raw = teams_text.split("@")
         away_team = away_team_raw.strip()
         home_team = home_team_raw.strip()
-        spread = spread_text.upper()
+
+        # Extract just the spread value using regex to find first occurrence of + or - and everything after
+        match = re.search(r"[+-].*", spread_text)
+        spread = match.group(0).upper() if match else spread_text.upper()
+
         total_cleaned = total_text.lower().replace("o/u ", "").replace("under ", "").replace("over ", "")
 
         game_data = GameData(
@@ -171,14 +176,18 @@ def get_covers_games(game_date: date) -> pl.DataFrame:
         # Assume for today we're parsing the morning before the games start
         # History pages vs future pages have a different format
         if game_date < today:
+            # Historical games have a different structure
             container_xpath = '//article[contains(@class, "gamebox") and contains(@class, "postgamebox")]'
             teams_xpath = './/p[contains(@class, "gamebox-header")]/strong[@class="text-uppercase"]'
+
+            # Spread is in a <strong> element contained within a paragraph with class "summary-box"
+            # The text contains the team name + the spread value, e.g., "UNC -10.5"
             spread_xpath = './/p[contains(@class, "summary-box")]/strong[1]'
-            total_xpath = (
-                ".//p[contains(@class, 'summary-box')]/strong[starts-with(normalize-space(text()), 'under ') "
-                "or starts-with(normalize-space(text()), 'over ')]"
-            )
+
+            # Total is in a <strong> tag in the summary box with text starting with "under" or "over"
+            total_xpath = './/p[contains(@class, "summary-box")]/strong[starts-with(normalize-space(text()), "under ") or starts-with(normalize-space(text()), "over ")]'
         else:
+            # Future games have a different structure
             container_xpath = '//article[contains(@class, "gamebox pregamebox")]'
             teams_xpath = './/p[@id="gamebox-header"]/strong[@class="text-uppercase"]'
             spread_xpath = './/span[contains(@class, "team-consensus")][2]/text()[normalize-space()]'
