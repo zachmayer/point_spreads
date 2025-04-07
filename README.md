@@ -7,7 +7,7 @@ Historical data for men's college basketball point spreads and totals.
 - Add historic neutral games to old data
 - Parse neutral games
 - Make data loader for the csv that uses the schema and use it in the tests
-- Run all spreads
+- Delete all old data and re-scrape everything after 2019-11-05
 
 ## Example data
 
