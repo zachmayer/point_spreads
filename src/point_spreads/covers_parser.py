@@ -2,7 +2,7 @@
 
 import datetime
 from datetime import date as date_type
-from typing import Any, TypeVar
+from typing import Any, List, TypeVar
 
 import polars as pl
 import requests
@@ -60,6 +60,12 @@ class GameDataWithDates(GameData):
 
     game_date: date_type = Field(description="Date of the game")
     updated_date: date_type = Field(description="Date when the data was last updated")
+
+
+class GameDataList(BaseModel):
+    """List of game data objects parsed from multiple game boxes."""
+
+    games: List[GameData] = Field(description="List of parsed game data objects")
 
 
 # Define shared model settings for deterministic behavior
@@ -121,17 +127,22 @@ calendar_parser_agent = Agent(
 )
 
 
-# Define the game box parser agent
-gamebox_parser_agent = Agent(
+# Define the batch game box parser agent
+gamebox_batch_parser_agent = Agent(
     "google-gla:gemini-2.0-flash",
-    result_type=GameData,
+    result_type=GameDataList,
     model_settings=MODEL_SETTINGS,
     system_prompt="""
     You are a specialized parser for NCAA basketball game information from Covers.com HTML.
 
-    Extract the following information from the provided HTML game box:
-    1. Home team name (use the full name from the header, e.g., "Houston" not "HOU")
-    2. Away team name (use the full name from the header, e.g., "Florida" not "FLA")
+    You will be given HTML content containing MULTIPLE game boxes. Parse ALL game boxes and return
+    a LIST of game data objects.
+
+    For each game box, extract the following information:
+    1. Home team name - use ONLY the standardized school name WITHOUT the mascot
+       (e.g., "Western Carolina" not "Western Carolina Catamounts")
+    2. Away team name - use ONLY the standardized school name WITHOUT the mascot
+       (e.g., "Penn State" not "Penn St. Nittany Lions")
     3. Home team spread - in the team's perspective
        (e.g., "-3.5" if home team is favorite, "+3.5" if home team is underdog)
     4. Away team spread - in the team's perspective
@@ -139,6 +150,30 @@ gamebox_parser_agent = Agent(
     5. Total over/under points (as a string, just the number without "o/u" prefix)
     6. Neutral location (boolean, true if "(N)" appears in the header)
     7. Tournament name (if available, use empty string if none found)
+
+    TEAM NAME STANDARDIZATION RULES:
+    - Use the widely recognized, unambiguous name of the school
+    - Remove all mascot references (Wildcats, Eagles, Tigers, etc.)
+    - Use common full names instead of abbreviations (e.g., "Penn State" not "Penn St.")
+    - For "University of X", use the location name only if that's how the team is commonly known
+      (e.g., "Kentucky" for "University of Kentucky", but "Miami (FL)" for "University of Miami")
+    - Keep directional indicators if they're part of the school name (e.g., "Western Carolina", "North Carolina")
+    - Use standard abbreviations only if that's how the team is widely known (e.g., "UCLA", "USC", "UNLV")
+    - Use "(FL)" or "(OH)" suffixes to disambiguate schools with the same name in different states
+      (e.g., "Miami (FL)" vs "Miami (OH)")
+
+    EXAMPLES OF TEAM NAME STANDARDIZATION:
+    - "Western Carolina Catamounts" → "Western Carolina"
+    - "Penn St. Nittany Lions" → "Penn State"
+    - "North Alabama Lions" → "North Alabama"
+    - "Southern Utah Thunderbirds" → "Southern Utah"
+    - "University of Virginia Cavaliers" → "Virginia"
+    - "Ohio Bobcats" → "Ohio"
+    - "Oregon State Beavers" → "Oregon State"
+    - "Miami (FL) Hurricanes" → "Miami (FL)"
+    - "Miami (OH) RedHawks" → "Miami (OH)"
+    - "University of California Golden Bears" → "California"
+    - "University of California, Los Angeles Bruins" → "UCLA"
 
     For spreads, careful analysis is required:
 
@@ -167,6 +202,9 @@ gamebox_parser_agent = Agent(
 
     Return values as strings for spreads and totals, maintaining the original format with signs.
     If a value is unavailable, use a reasonable default or empty string.
+
+    RETURN FORMAT:
+    Return a list of game data objects. Each object should contain all the fields described above.
     """,
 )
 
@@ -268,26 +306,28 @@ def _parse_games(
 
     # Unified container XPath that gets all game boxes
     containers = tree.xpath('//article[contains(@class, "gamebox")]')
-    games: list[GameDataWithDates] = []
+
+    if not containers:
+        return get_empty_dataframe()
+
+    # Instead of parsing each game individually, extract all container HTML at once
+    all_containers_html = ""
+    for i, container in enumerate(containers):
+        container_html = html.tostring(container, encoding="unicode")
+        all_containers_html += f"\n\n--- GAME BOX {i + 1} ---\n\n{container_html}"
 
     # Get today's date for the updated_date field
     today = datetime.date.today()
 
-    for container in containers:
-        # Convert the container to HTML string for Pydantic AI parsing
-        container_html = html.tostring(container, encoding="unicode")
+    # Parse all game boxes at once
+    game_data_list = _run_agent_with_retry(gamebox_batch_parser_agent, all_containers_html)
+    games: list[GameDataWithDates] = []
 
-        # Use the agent with retry to parse the game box
-        extracted_data = _run_agent_with_retry(gamebox_parser_agent, container_html)
-
-        # Create a complete GameDataWithDates object by adding the dates
-        game_data = GameDataWithDates(**extracted_data.model_dump(), game_date=expected_date, updated_date=today)
-
-        print(game_data)
-        games.append(game_data)
-
-    if not games:
-        return get_empty_dataframe()
+    # Add dates to each game and print for debugging
+    for game_data in game_data_list.games:
+        game_with_dates = GameDataWithDates(**game_data.model_dump(), game_date=expected_date, updated_date=today)
+        print(game_with_dates)
+        games.append(game_with_dates)
 
     return pl.DataFrame([game.model_dump() for game in games])
 
