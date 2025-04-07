@@ -137,7 +137,18 @@ def _parse_games(
         home_team = home_team_raw.strip()
 
         # Extract just the spread value using regex to find first occurrence of + or - and everything after
-        spread = (re.search(r"[+-].*", spread_text) or "PK").group(0).upper()
+        # Regex pattern matches team abbreviation followed by spread:
+        # [A-Z] - team abbreviation
+        # " " - space
+        # [+-] - + or -
+        # .* - everything after the + or -
+        # | - or
+        # PK - PK
+        # - "UNC -10.5" -> group(1) = "-10.5"
+        # - "SCAR +7"    -> group(1) = "+7"
+        # - "FOR PK"     -> group(1) = "PK"
+        match = re.search(r"[A-Z]+ ([+-].*|PK)", spread_text)
+        spread = match.group(1).upper() if match else spread_text.upper()
 
         total_cleaned = total_text.lower().replace("o/u ", "")
         total_cleaned = total_cleaned.replace("under ", "").replace("over ", "")
