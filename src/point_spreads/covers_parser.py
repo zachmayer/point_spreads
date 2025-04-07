@@ -1,11 +1,19 @@
 """Parser for Covers.com NCAA basketball HTML data."""
 
 from datetime import date, datetime
+from pathlib import Path
 
 import pandas as pd
 import requests
+from diskcache import FanoutCache  # type: ignore
 from lxml import html
 from pydantic import BaseModel
+from tenacity import retry, stop_after_attempt, wait_random_exponential
+
+# Create a cache with unlimited size in the project root directory
+cache_dir = Path(__file__).parent.parent.parent / ".cache"
+cache_dir.mkdir(exist_ok=True)
+cache = FanoutCache(directory=str(cache_dir))
 
 
 class GameData(BaseModel):
@@ -17,6 +25,8 @@ class GameData(BaseModel):
     total: str
 
 
+@retry(wait=wait_random_exponential(multiplier=1, max=60), stop=stop_after_attempt(5))
+@cache.memoize(typed=True, expire=60 * 60 * 24, tag="html")
 def download_covers_html(game_date: date) -> str:
     """
     Download Covers.com HTML for a specific date.

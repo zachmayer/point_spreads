@@ -40,3 +40,8 @@ install: ## Set up the project with dependencies and pre-commit hooks
 .PHONY: install-ci
 install-ci: ## Install dependencies from the lockfile for CI
 	uv sync --frozen
+
+.PHONY: clean
+clean: clean-cache ## Clean up temporary files and caches
+	rm -rf uv.lock
+	rm -rf .cache
