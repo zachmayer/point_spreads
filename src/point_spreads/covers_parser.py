@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from pathlib import Path
 
-import pandas as pd
+import polars as pl
 import requests
 from diskcache import FanoutCache  # type: ignore
 from lxml import html
@@ -48,7 +48,7 @@ def _parse_games(
     spread_xpath: str,
     total_xpath: str,
     displayed_date_xpath: str,
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     """
     Generic parser for Covers.com game data using provided XPaths.
     Includes validation against the displayed date on the page.
@@ -102,7 +102,7 @@ def _parse_games(
     full_date_str = f"{displayed_date_str} {year}"
     displayed_date = datetime.strptime(full_date_str, "%b %d %Y").date()
     if displayed_date != expected_date:
-        return pd.DataFrame(columns=list(GameData.model_fields.keys()))
+        return pl.DataFrame(schema={k: type(v) for k, v in GameData.model_fields.items()})
 
     # Extract game data
     game_containers = tree.xpath(container_xpath)
@@ -129,12 +129,12 @@ def _parse_games(
         games.append(game_data)
 
     if not games:
-        return pd.DataFrame(columns=list(GameData.model_fields.keys()))
+        return pl.DataFrame(schema={k: type(v) for k, v in GameData.model_fields.items()})
 
-    return pd.DataFrame([game.model_dump() for game in games])
+    return pl.DataFrame([game.model_dump() for game in games])
 
 
-def get_covers_games(game_date: date) -> pd.DataFrame:
+def get_covers_games(game_date: date) -> pl.DataFrame:
     """
     Get games for a specific date from Covers.com.
     """

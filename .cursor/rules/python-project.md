@@ -14,13 +14,9 @@
 - Minimize branching - flat code flows better
 - Functions: small, focused, typed, descriptively named
 - Skip abstractions for single-use code
+- Don't add excessive, defensive, or unnecessary early return cases
 - Collocate related functionality
 - 120 char line limit
-
-## Testing & CI
-
-- PyTest for all tests - no unittest
-- GitHub Actions for CI/CD
 
 ## Typing
 
@@ -35,3 +31,9 @@
 - Minimal, high-bitrate docs - maximize information/word ratio
 - Explain *why*, not *what*
 - Simplify code before adding documentation
+
+## Libraries
+
+- polars for all data frame opps - no pandas
+- PyTest for all tests - no unittest
+- GitHub Actions for CI/CD

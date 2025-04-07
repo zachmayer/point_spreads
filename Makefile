@@ -41,6 +41,10 @@ install: ## Set up the project with dependencies and pre-commit hooks
 install-ci: ## Install dependencies from the lockfile for CI
 	uv sync --frozen
 
+.PHONY: update-games
+update-games: ## Update basketball game data from Covers.com
+	uv run python -m point_spreads.multi_parser
+
 .PHONY: clean
 clean: ## Clean up temporary files and caches
 	rm -rf uv.lock

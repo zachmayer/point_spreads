@@ -14,8 +14,6 @@ dependencies = [
     "click>=8.1.8",
     "diskcache>=5.6.3",
     "lxml>=5.3.2",
-    "pandas>=2.2.3",
-    "pandas-stubs>=2.2.3.250308",
     "polars>=1.26.0",
     "pre-commit>=4.2.0",
     "pydantic>=2.11.2",
@@ -25,6 +23,7 @@ dependencies = [
     "requests>=2.32.3",
     "ruff>=0.11.4",
     "tenacity>=9.1.2",
+    "tqdm>=4.67.1",
     "types-lxml>=2025.3.30",
 ]
 
