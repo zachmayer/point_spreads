@@ -1,11 +1,11 @@
 """Multi-date parser for Covers.com NCAA basketball data."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import polars as pl
 from tqdm import tqdm
 
-from point_spreads.covers_parser import get_covers_games
+from point_spreads.covers_parser import GAME_DATA_SCHEMA, get_covers_games
 
 
 def get_covers_games_for_dates(dates: list[date]) -> pl.DataFrame:
@@ -35,7 +35,7 @@ def get_covers_games_for_dates(dates: list[date]) -> pl.DataFrame:
         dataframes.append(games_df)
 
     # Concatenate the dataframes vertically - will return empty DataFrame if dataframes is empty
-    return pl.concat(dataframes, how="vertical") if dataframes else pl.DataFrame()
+    return pl.concat(dataframes, how="vertical") if dataframes else pl.DataFrame(schema=GAME_DATA_SCHEMA)
 
 
 def main() -> None:
@@ -45,26 +45,26 @@ def main() -> None:
     2. Filter for recent records
     3. Generate a list of unique dates to fetch
     4. Get game data for these dates
-    5. Save results to CSV
+    5. Update existing data and append new data
+    6. Save results to CSV
     """
     # Load the CSV file
     csv_path = "data/spreads_and_totals.csv"
+    output_path = csv_path
 
-    df = pl.read_csv(csv_path)
-
-    # Convert date columns to datetime
-    df = df.with_columns([pl.col("game_date").str.to_datetime(), pl.col("updated_date").str.to_datetime()])
+    # Read existing data with the correct schema
+    existing_df = pl.read_csv(csv_path, schema=GAME_DATA_SCHEMA)
 
     # Filter for records where game_date is >= updated_date - 1
-    filtered_df = df.filter(pl.col("game_date") >= pl.col("updated_date") - timedelta(days=1))
+    filtered_df = existing_df.filter(pl.col("game_date") >= pl.col("updated_date") - timedelta(days=1))
 
-    # Start with existing dates from the DataFrame and convert to Python dates
-    existing_dates = [d.date() for d in filtered_df.get_column("game_date").unique()]
+    # Extract game dates from the DataFrame
+    existing_dates = filtered_df.select("game_date").unique().to_series().to_list()
     dates_set: set[date] = set(existing_dates)
 
     # Generate date range from min(today, last game date) to today + 8 days
     last_game_date = max(existing_dates)
-    today = datetime.now().date()
+    today = date.today()
     start_date = min(last_game_date, today)
     end_date = today + timedelta(days=8)
 
@@ -78,12 +78,46 @@ def main() -> None:
     dates_list = sorted(list(dates_set))
 
     # Get game data for these dates
-    result_df = get_covers_games_for_dates(dates_list)
+    new_data_df = get_covers_games_for_dates(dates_list)
+
+    # Drop rows with missing spreads
+    new_data_df = new_data_df.filter(pl.col("spread").is_not_null())
+
+    # Create composite keys for both dataframes
+    key_expr = pl.concat_str(
+        [pl.col("game_date").cast(pl.Utf8), pl.col("home_team"), pl.col("away_team")], separator="|"
+    ).alias("composite_key")
+
+    existing_df = existing_df.with_columns([key_expr])
+    new_data_df = new_data_df.with_columns([key_expr])
+
+    # Extract keys for comparison
+    existing_keys = existing_df.select("composite_key").to_series().to_list()
+
+    # Split new data into updates and inserts
+    updates_df = new_data_df.filter(pl.col("composite_key").is_in(existing_keys))
+    inserts_df = new_data_df.filter(~pl.col("composite_key").is_in(existing_keys))
+
+    # Remove records to be updated from existing data
+    update_keys = updates_df.select("composite_key").to_series().to_list()
+    existing_df = existing_df.filter(~pl.col("composite_key").is_in(update_keys))
+
+    # Drop the composite key column before combining
+    existing_df = existing_df.drop("composite_key")
+    updates_df = updates_df.drop("composite_key")
+    inserts_df = inserts_df.drop("composite_key")
+
+    # Combine existing data with updates and inserts
+    all_dfs = [existing_df, updates_df, inserts_df]
+    result_df = pl.concat(all_dfs, how="vertical")
+
+    # Sort by game_date, home_team, away_team
+    result_df = result_df.sort(["game_date", "home_team", "away_team"])
 
     # Save results to CSV
-    output_path = "data/updated_games.csv"
     result_df.write_csv(output_path)
     print(f"Updated data saved to {output_path}")
+    print(f"Updated {len(updates_df)} records, added {len(inserts_df)} new records")
 
 
 if __name__ == "__main__":

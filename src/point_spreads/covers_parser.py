@@ -16,27 +16,30 @@ cache_dir.mkdir(exist_ok=True)
 cache = FanoutCache(directory=str(cache_dir))
 
 
+# Define the schema for game data - this can be imported by other modules
+GAME_DATA_SCHEMA = {
+    "game_date": pl.Date,
+    "updated_date": pl.Date,
+    "home_team": pl.Utf8,
+    "away_team": pl.Utf8,
+    "spread": pl.Utf8,
+    "total": pl.Utf8,
+}
+
+
 class GameData(BaseModel):
     game_date: date
-    update_date: date
+    updated_date: date
     home_team: str
     away_team: str
     spread: str
     total: str
 
 
+# Define an empty DataFrame schema that matches the GameData model
 def get_empty_dataframe() -> pl.DataFrame:
     """Create an empty DataFrame with the correct schema for game data."""
-    return pl.DataFrame(
-        schema={
-            "game_date": pl.Date,
-            "update_date": pl.Date,
-            "home_team": pl.Utf8,
-            "away_team": pl.Utf8,
-            "spread": pl.Utf8,
-            "total": pl.Utf8,
-        }
-    )
+    return pl.DataFrame(schema=GAME_DATA_SCHEMA)
 
 
 @retry(wait=wait_random_exponential(multiplier=1, max=60), stop=stop_after_attempt(5))
@@ -136,7 +139,7 @@ def _parse_games(
 
         game_data = GameData(
             game_date=expected_date,
-            update_date=date.today(),
+            updated_date=date.today(),
             home_team=home_team,
             away_team=away_team,
             spread=spread,
@@ -154,33 +157,33 @@ def get_covers_games(game_date: date) -> pl.DataFrame:
     """
     Get games for a specific date from Covers.com.
     """
-    html_content = download_covers_html(game_date)
-    today = date.today()
-
-    # XPath for the actual date on the page (may not match the requested date!)
-    displayed_date_xpath = (
-        "//div[@id='covers-CoversScoreboard-league-next-and-prev']"
-        "/a[@class='navigation-anchor active isDailySport']"
-        "/div[@class='date']"
-    )
-
-    # Assume for today we're parsing the morning before the games start
-    # History pages vs future pages have a different format
-    if game_date < today:
-        container_xpath = '//article[contains(@class, "gamebox") and contains(@class, "postgamebox")]'
-        teams_xpath = './/p[contains(@class, "gamebox-header")]/strong[@class="text-uppercase"]'
-        spread_xpath = './/p[contains(@class, "summary-box")]/strong[1]'
-        total_xpath = (
-            ".//p[contains(@class, 'summary-box')]/strong[starts-with(normalize-space(text()), 'under ') "
-            "or starts-with(normalize-space(text()), 'over ')]"
-        )
-    else:
-        container_xpath = '//article[contains(@class, "gamebox pregamebox")]'
-        teams_xpath = './/p[@id="gamebox-header"]/strong[@class="text-uppercase"]'
-        spread_xpath = './/span[contains(@class, "team-consensus")][2]/text()[normalize-space()]'
-        total_xpath = './/span[contains(@class, "team-overunder")]'
-
     try:
+        html_content = download_covers_html(game_date)
+        today = date.today()
+
+        # XPath for the actual date on the page (may not match the requested date!)
+        displayed_date_xpath = (
+            "//div[@id='covers-CoversScoreboard-league-next-and-prev']"
+            "/a[@class='navigation-anchor active isDailySport']"
+            "/div[@class='date']"
+        )
+
+        # Assume for today we're parsing the morning before the games start
+        # History pages vs future pages have a different format
+        if game_date < today:
+            container_xpath = '//article[contains(@class, "gamebox") and contains(@class, "postgamebox")]'
+            teams_xpath = './/p[contains(@class, "gamebox-header")]/strong[@class="text-uppercase"]'
+            spread_xpath = './/p[contains(@class, "summary-box")]/strong[1]'
+            total_xpath = (
+                ".//p[contains(@class, 'summary-box')]/strong[starts-with(normalize-space(text()), 'under ') "
+                "or starts-with(normalize-space(text()), 'over ')]"
+            )
+        else:
+            container_xpath = '//article[contains(@class, "gamebox pregamebox")]'
+            teams_xpath = './/p[@id="gamebox-header"]/strong[@class="text-uppercase"]'
+            spread_xpath = './/span[contains(@class, "team-consensus")][2]/text()[normalize-space()]'
+            total_xpath = './/span[contains(@class, "team-overunder")]'
+
         return _parse_games(
             html_content,
             expected_date=game_date,
