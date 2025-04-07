@@ -24,6 +24,9 @@ jobs:
       
       - name: Install dependencies
         run: make install-ci
-        
+
       - name: Run checks
-        run: make check 
+        run: make check
+
+      - name: Run tests
+        run: make test
