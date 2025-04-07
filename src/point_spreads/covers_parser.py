@@ -186,7 +186,11 @@ def get_covers_games(game_date: date) -> pl.DataFrame:
             spread_xpath = './/p[contains(@class, "summary-box")]/strong[1]'
 
             # Total is in a <strong> tag in the summary box with text starting with "under" or "over"
-            total_xpath = './/p[contains(@class, "summary-box")]/strong[starts-with(normalize-space(text()), "under ") or starts-with(normalize-space(text()), "over ")]'
+            total_xpath = (
+                './/p[contains(@class, "summary-box")]/strong['
+                'starts-with(normalize-space(text()), "under ") or '
+                'starts-with(normalize-space(text()), "over ")]'
+            )
         else:
             # Future games have a different structure
             container_xpath = '//article[contains(@class, "gamebox pregamebox")]'
