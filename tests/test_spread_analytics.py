@@ -6,6 +6,8 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from point_spreads.covers_parser import parse_spread
+
 # Global constants
 TEST_YEARS = range(2011, 2025)
 MONTHLY_THRESHOLDS = {
@@ -42,6 +44,38 @@ def get_test_data() -> pl.DataFrame:
 
     print(df_with_year.head())
     return df_with_year
+
+
+@pytest.mark.parametrize(
+    "input_text,expected",
+    [
+        ("UNC -10.5", "-10.5"),
+        ("SCAR +7", "+7"),
+        ("MASS +3", "+3"),
+        ("FOR PK", "0"),
+        ("LT PK", "0"),
+        ("DUKE -4.5", "-4.5"),
+    ],
+)
+def test_parse_spread(input_text: str, expected: str) -> None:
+    """Test spread parsing with various formats."""
+    assert parse_spread(input_text) == expected
+
+
+@pytest.mark.parametrize(
+    "invalid_text",
+    [
+        "",  # Empty string
+        "UNC",  # Just team
+        "ABC 123",  # No spread indicator
+        "LTPK",  # Ambiguous format
+        "UNC+3",  # Ambiguous format
+    ],
+)
+def test_parse_spread_errors(invalid_text: str) -> None:
+    """Test that invalid spread formats raise ValueError."""
+    with pytest.raises(ValueError):
+        parse_spread(invalid_text)
 
 
 @pytest.mark.parametrize("year", TEST_YEARS)
@@ -241,3 +275,15 @@ def test_major_team_coverage(year: int, team: str) -> None:
     games_with_spreads = team_data.filter(pl.col("spread").is_not_null()).height
 
     assert games_with_spreads >= 20, f"{team} has only {games_with_spreads} spreads in {year} (<20)"
+
+
+@pytest.mark.parametrize("year", TEST_YEARS)
+def test_no_dupe_games(year: int) -> None:
+    """Test that there are no duplicate games in the data."""
+    pass  # TODO: Implement this
+
+
+@pytest.mark.parametrize("year", TEST_YEARS)
+def test_np_team_plays_twice_in_one_day(year: int) -> None:
+    """Test that no team plays twice in one day."""
+    pass  # TODO: Implement this

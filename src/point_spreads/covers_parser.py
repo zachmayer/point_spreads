@@ -58,6 +58,31 @@ def download_covers_html(game_date: date) -> str:
     return response.text
 
 
+def parse_spread(spread_text: str) -> str:
+    """
+    Parse spread value from text that may contain team abbreviation.
+
+    Examples:
+        "UNC -10.5" -> "-10.5"  (captures "-10.5")
+        "SCAR +7"   -> "+7"     (captures "+7")
+        "FOR PK"    -> "0"     (captures "PK")
+        "LT PK"     -> "0"     (captures "PK")
+        "LTPK"      -> ValueError
+        "UNC+3"     -> ValueError
+    """
+    # Match team abbreviation + space + capturing group containing either:
+    # 1. +/- and numbers
+    # 2. PK
+    match = re.search(r"[A-Z]+ ([+-].*|PK)", spread_text)
+    if not match:
+        raise ValueError(f"Invalid spread format: {spread_text}")
+    spread_value = match.group(1).upper()
+
+    if spread_value == "PK":
+        spread_value = "0"
+    return spread_value
+
+
 def _parse_games(
     html_content: str,
     expected_date: date,
@@ -136,20 +161,7 @@ def _parse_games(
         away_team = away_team_raw.strip()
         home_team = home_team_raw.strip()
 
-        # Extract just the spread value using regex to find first occurrence of + or - and everything after
-        # Regex pattern matches team abbreviation followed by spread:
-        # [A-Z] - team abbreviation
-        # " " - space
-        # [+-] - + or -
-        # .* - everything after the + or -
-        # | - or
-        # PK - PK
-        # - "UNC -10.5" -> group(1) = "-10.5"
-        # - "SCAR +7"    -> group(1) = "+7"
-        # - "FOR PK"     -> group(1) = "PK"
-        match = re.search(r"[A-Z]+ ([+-].*|PK)", spread_text)
-        spread = match.group(1).upper() if match else spread_text.upper()
-
+        spread = parse_spread(spread_text)
         total_cleaned = total_text.lower().replace("o/u ", "")
         total_cleaned = total_cleaned.replace("under ", "").replace("over ", "")
 
@@ -187,19 +199,18 @@ def get_covers_games(game_date: date) -> pl.DataFrame:
         # Assume for today we're parsing the morning before the games start
         # History pages vs future pages have a different format
         if game_date < today:
-            # Historical games have a different structure
+            # Historical games have a consistent structure:
+            # <article class="gamebox postgamebox">
+            #   <div class="article-content">
+            #     <div class="trending-and-cover-by-container">
+            #       <p><span>TEAM PK</span></p>
+            #     </div>
+            #   </div>
             container_xpath = '//article[contains(@class, "gamebox") and contains(@class, "postgamebox")]'
             teams_xpath = './/p[contains(@class, "gamebox-header")]/strong[@class="text-uppercase"]'
-
-            # Spread is in a <strong> element contained within a paragraph with class "summary-box"
-            # The text contains the team name + the spread value, e.g., "UNC -10.5"
-            spread_xpath = './/p[contains(@class, "summary-box")]/strong[1]'
-
-            # Total is in a <strong> tag in the summary box with text starting with "under" or "over"
+            spread_xpath = './/div[contains(@class, "trending-and-cover-by-container")]/p[1]/span'
             total_xpath = (
-                './/p[contains(@class, "summary-box")]/strong['
-                'starts-with(normalize-space(text()), "under ") or '
-                'starts-with(normalize-space(text()), "over ")]'
+                './/p[contains(@class, "summary-box")]/strong[contains(text(), "under ") or contains(text(), "over ")]'
             )
         else:
             # Future games have a different structure
@@ -225,6 +236,11 @@ def get_covers_games(game_date: date) -> pl.DataFrame:
 # A few simple tests of the parser
 if __name__ == "__main__":
     past_date = date(2023, 3, 8)
+    print(f"--- Parsing Historical Example ({past_date}) ---")
+    historical_games_df = get_covers_games(past_date)
+    print(historical_games_df)
+
+    past_date = date(2024, 11, 13)
     print(f"--- Parsing Historical Example ({past_date}) ---")
     historical_games_df = get_covers_games(past_date)
     print(historical_games_df)
