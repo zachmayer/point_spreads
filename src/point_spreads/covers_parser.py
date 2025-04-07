@@ -173,8 +173,8 @@ def get_covers_games(game_date: date) -> pl.DataFrame:
         if game_date < today:
             container_xpath = '//article[contains(@class, "gamebox") and contains(@class, "postgamebox")]'
             teams_xpath = './/p[contains(@class, "gamebox-header")]/strong[@class="text-uppercase"]'
-            total_xpath = './/p[contains(@class, "summary-box")]/strong[1]'
-            spread_xpath = (
+            spread_xpath = './/p[contains(@class, "summary-box")]/strong[1]'
+            total_xpath = (
                 ".//p[contains(@class, 'summary-box')]/strong[starts-with(normalize-space(text()), 'under ') "
                 "or starts-with(normalize-space(text()), 'over ')]"
             )
