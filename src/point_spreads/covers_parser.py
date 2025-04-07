@@ -25,6 +25,20 @@ class GameData(BaseModel):
     total: str
 
 
+def get_empty_dataframe() -> pl.DataFrame:
+    """Create an empty DataFrame with the correct schema for game data."""
+    return pl.DataFrame(
+        schema={
+            "game_date": pl.Date,
+            "update_date": pl.Date,
+            "home_team": pl.Utf8,
+            "away_team": pl.Utf8,
+            "spread": pl.Utf8,
+            "total": pl.Utf8,
+        }
+    )
+
+
 @retry(wait=wait_random_exponential(multiplier=1, max=60), stop=stop_after_attempt(5))
 @cache.memoize(typed=True, expire=60 * 60 * 24, tag="html")
 def download_covers_html(game_date: date) -> str:
@@ -94,7 +108,6 @@ def _parse_games(
         year = min(years)
     elif month_num == 1:  # January uses later year
         year = max(years)
-
     else:  # Unexpected case - should not happen
         raise ValueError(f"Multiple years ({years}) for month {month_num}, expected only in Dec/Jan")
 
@@ -102,7 +115,7 @@ def _parse_games(
     full_date_str = f"{displayed_date_str} {year}"
     displayed_date = datetime.strptime(full_date_str, "%b %d %Y").date()
     if displayed_date != expected_date:
-        return pl.DataFrame(schema={k: type(v) for k, v in GameData.model_fields.items()})
+        return get_empty_dataframe()
 
     # Extract game data
     game_containers = tree.xpath(container_xpath)
@@ -112,7 +125,10 @@ def _parse_games(
         spread_text = container.xpath(f"string({spread_xpath})").strip()
         total_text = container.xpath(f"string({total_xpath})").strip()
 
-        away_team_raw, home_team_raw = teams_text.split("@")  # Assumes '@' separator; will raise error if not
+        if "@" not in teams_text:
+            raise ValueError(f"Missing '@' separator in teams text: '{teams_text}'")
+
+        away_team_raw, home_team_raw = teams_text.split("@")
         away_team = away_team_raw.strip()
         home_team = home_team_raw.strip()
         spread = spread_text.upper()
@@ -129,7 +145,7 @@ def _parse_games(
         games.append(game_data)
 
     if not games:
-        return pl.DataFrame(schema={k: type(v) for k, v in GameData.model_fields.items()})
+        return get_empty_dataframe()
 
     return pl.DataFrame([game.model_dump() for game in games])
 
@@ -164,15 +180,19 @@ def get_covers_games(game_date: date) -> pl.DataFrame:
         spread_xpath = './/span[contains(@class, "team-consensus")][2]/text()[normalize-space()]'
         total_xpath = './/span[contains(@class, "team-overunder")]'
 
-    return _parse_games(
-        html_content,
-        expected_date=game_date,
-        container_xpath=container_xpath,
-        teams_xpath=teams_xpath,
-        spread_xpath=spread_xpath,
-        total_xpath=total_xpath,
-        displayed_date_xpath=displayed_date_xpath,
-    )
+    try:
+        return _parse_games(
+            html_content,
+            expected_date=game_date,
+            container_xpath=container_xpath,
+            teams_xpath=teams_xpath,
+            spread_xpath=spread_xpath,
+            total_xpath=total_xpath,
+            displayed_date_xpath=displayed_date_xpath,
+        )
+    except Exception as e:
+        # Add date context to the exception and re-raise
+        raise type(e)(f"Error for date {game_date}: {e}") from e
 
 
 # A few simple tests of the parser
