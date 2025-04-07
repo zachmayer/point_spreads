@@ -137,8 +137,7 @@ def _parse_games(
         home_team = home_team_raw.strip()
 
         # Extract just the spread value using regex to find first occurrence of + or - and everything after
-        match = re.search(r"[+-].*", spread_text)
-        spread = match.group(0).upper() if match else spread_text.upper()
+        spread = (re.search(r"[+-].*", spread_text) or "PK").group(0).upper()
 
         total_cleaned = total_text.lower().replace("o/u ", "")
         total_cleaned = total_cleaned.replace("under ", "").replace("over ", "")
