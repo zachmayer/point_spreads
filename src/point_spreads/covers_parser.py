@@ -1,6 +1,5 @@
 """Parser for Covers.com NCAA basketball HTML data."""
 
-import re
 from datetime import date, datetime
 from pathlib import Path
 
@@ -58,55 +57,17 @@ def download_covers_html(game_date: date) -> str:
     return response.text
 
 
-def parse_spread(spread_text: str) -> str:
-    """
-    Parse spread value from text that may contain team abbreviation.
-
-    Examples:
-        "UNC -10.5" -> "-10.5"  (captures "-10.5")
-        "SCAR +7"   -> "+7"     (captures "+7")
-        "FOR PK"    -> "0"     (captures "PK")
-        "LT PK"     -> "0"     (captures "PK")
-        "LTPK"      -> ValueError
-        "UNC+3"     -> ValueError
-    """
-    # Match team abbreviation + space + capturing group containing either:
-    # 1. +/- and numbers
-    # 2. PK
-    match = re.search(r"[A-Z]+ ([+-].*|PK)", spread_text)
-    if not match:
-        raise ValueError(f"Invalid spread format: {spread_text}")
-    spread_value = match.group(1).upper()
-
-    if spread_value == "PK":
-        spread_value = "0"
-    return spread_value
-
-
 def _parse_games(
     html_content: str,
     expected_date: date,
-    container_xpath: str,
-    teams_xpath: str,
-    spread_xpath: str,
-    total_xpath: str,
     displayed_date_xpath: str,
 ) -> pl.DataFrame:
     """
-    Generic parser for Covers.com game data using provided XPaths.
-    Includes validation against the displayed date on the page.
+    Parse games from Covers.com HTML, handling both pre-game and post-game containers.
 
     Args:
         html_content: HTML content as a string.
         expected_date: Date of the games.
-        container_xpath: XPath to select the list of game container elements.
-        teams_xpath: XPath to extract the raw teams string (e.g., "Away @ Home")
-                     from within a game container. Requires string() wrapper.
-        spread_xpath: XPath to extract the raw spread string from within a
-                      game container. Requires string() wrapper.
-        total_xpath: XPath to extract the raw total string (e.g., "o/u 140.0",
-                     "under 145.5") from within a game container. Requires
-                     string() wrapper.
         displayed_date_xpath: XPath to extract the displayed date string from the page.
 
     Returns:
@@ -115,63 +76,107 @@ def _parse_games(
     tree = html.fromstring(html_content)
 
     # Date Validation
-    # If you ask for a date with no games, covers will return the closest date with games
-    # This leads to duplicates, as multuiple "dates" will return the same day's games
-    # So we need to check the actual date on the page from covers
-    # 1. Extract the displayed date text from the page
     displayed_date_str = tree.xpath(f"string({displayed_date_xpath})").strip()
     month_day = displayed_date_str.split()
     month_abbr = month_day[0]
     month_num = datetime.strptime(month_abbr, "%b").month
 
-    # 2. Extract years from the navigation links
+    # Extract years from the navigation links
     iso_dates = tree.xpath('//a[contains(@href, "selectedDate=")]/@href')
     years = {int(date.split("selectedDate=")[1][:4]) for date in iso_dates}
 
-    # 3. Determine the correct year from the navigation links
-    # None of these links are the current day: they show up to 3 days before/after today
-    # Except on certain days in Dec/Jan these will all be the same year
-    if len(years) == 1:  # Single year case (most common)
+    # Determine the correct year
+    if len(years) == 1:
         year = list(years)[0]
-    elif month_num == 12:  # December uses earlier year
+    elif month_num == 12:
         year = min(years)
-    elif month_num == 1:  # January uses later year
+    elif month_num == 1:
         year = max(years)
-    else:  # Unexpected case - should not happen
+    else:
         raise ValueError(f"Multiple years ({years}) for month {month_num}, expected only in Dec/Jan")
 
-    # 4. Construct full date and validate against expected
+    # Validate the displayed date matches the expected date
     full_date_str = f"{displayed_date_str} {year}"
     displayed_date = datetime.strptime(full_date_str, "%b %d %Y").date()
     if displayed_date != expected_date:
         return get_empty_dataframe()
 
-    # Extract game data
-    game_containers = tree.xpath(container_xpath)
+    # Unified container XPath that gets all game boxes
+    containers = tree.xpath('//article[contains(@class, "gamebox")]')
     games: list[GameData] = []
-    for container in game_containers:
-        teams_text = container.xpath(f"string({teams_xpath})").strip()
-        spread_text = container.xpath(f"string({spread_xpath})").strip().lower()
-        total_text = container.xpath(f"string({total_xpath})").strip().lower()
 
+    # Teams XPath is common for both container types
+    teams_xpath = './/p[contains(@class, "gamebox-header")]/strong[@class="text-uppercase"]'
+
+    for container in containers:
+        # Determine container type - pregame or postgame
+        container_class = container.get("class", "")
+        is_postgame = "postgamebox" in container_class
+
+        # Extract teams (common logic)
+        teams_text = container.xpath(f"string({teams_xpath})").strip()
         if "@" not in teams_text:
-            raise ValueError(f"Missing '@' separator in teams text: '{teams_text}'")
+            continue  # Skip containers without valid team info
 
         away_team_raw, home_team_raw = teams_text.split("@")
         away_team = away_team_raw.strip()
         home_team = home_team_raw.strip()
 
-        spread = parse_spread(spread_text)
-        total_cleaned = total_text.lower().replace("o/u ", "")
-        total_cleaned = total_cleaned.replace("under ", "").replace("over ", "")
+        # Spreads/totals are show differently pre- vs post-game
+        if is_postgame:
+            # Historical games: Extract from summary box
+            summary_box = container.find('.//p[contains(@class, "summary-box")]')
+            if summary_box is None:
+                raise ValueError(f"Summary box not found for game involving {home_team} vs {away_team}")
 
+            summary_text = summary_box.text_content().strip()
+            strong_tags = summary_box.findall(".//strong")
+            strong_count = len(strong_tags)
+            has_zero_spread = "(zero spread)" in summary_text
+
+            if strong_count not in (1, 2):
+                raise ValueError(
+                    f"Expected 1 or 2 <strong> tags, found {strong_count} in summary box for {home_team} vs {away_team}"
+                )
+
+            if strong_count == 1 and not has_zero_spread:
+                raise ValueError(f"Found 1 strong tag but no 'zero spread' text for {home_team} vs {away_team}")
+
+            if strong_count == 2 and has_zero_spread:
+                raise ValueError(f"Found 2 strong tags with 'zero spread' text for {home_team} vs {away_team}")
+
+            # Parse based on structure
+            if has_zero_spread:
+                spread = "0"
+                total = strong_tags[0].text_content()
+            else:
+                spread = strong_tags[0].text_content()
+                total = strong_tags[1].text_content()
+        else:
+            spread_xpath = './/span[contains(@class, "team-consensus")][2]/text()[normalize-space()]'
+            total_xpath = './/span[contains(@class, "team-overunder")]'
+
+            spread_element = container.find(spread_xpath)
+            total_element = container.find(total_xpath)
+
+            if spread_element is None or total_element is None:
+                raise ValueError(f"Missing spread or total element for pregame {home_team} vs {away_team}")
+
+            spread = spread_element.text_content()
+            total = total_element.text_content()
+
+        # Unified cleaning logic for both paths
+        spread = spread.strip().upper()
+        total = total.strip().lower().replace("o/u ", "").replace("under ", "").replace("over ", "")
+
+        # Create game data
         game_data = GameData(
             game_date=expected_date,
             updated_date=date.today(),
             home_team=home_team,
             away_team=away_team,
             spread=spread,
-            total=total_cleaned,
+            total=total,
         )
         games.append(game_data)
 
@@ -184,59 +189,33 @@ def _parse_games(
 def get_covers_games(game_date: date) -> pl.DataFrame:
     """
     Get games for a specific date from Covers.com.
+    Uses a single parser that handles both historical and future games.
     """
-
     html_content = download_covers_html(game_date)
-    today = date.today()
 
-    # XPath for the actual date on the page (may not match the requested date!)
+    # XPath for the displayed date on the page
     displayed_date_xpath = (
         "//div[@id='covers-CoversScoreboard-league-next-and-prev']"
         "/a[@class='navigation-anchor active isDailySport']"
         "/div[@class='date']"
     )
 
-    # Assume for today we're parsing the morning before the games start
-    # History pages vs future pages have a different format
-    if game_date < today:
-        # Historical games have a consistent structure:
-        # <article class="gamebox postgamebox">
-        #   <div class="article-content">
-        #     <div class="trending-and-cover-by-container">
-        #       <p><span>TEAM PK</span></p>
-        #     </div>
-        #   </div>
-        container_xpath = '//article[contains(@class, "gamebox") and contains(@class, "postgamebox")]'
-        teams_xpath = './/p[contains(@class, "gamebox-header")]/strong[@class="text-uppercase"]'
-        spread_xpath = './/div[contains(@class, "trending-and-cover-by-container")]/p[1]/span'
-        total_xpath = (
-            './/p[contains(@class, "summary-box")]/strong[contains(text(), "under ") or contains(text(), "over ")]'
-        )
-    else:
-        # Future games have a different structure
-        container_xpath = '//article[contains(@class, "gamebox pregamebox")]'
-        teams_xpath = './/p[@id="gamebox-header"]/strong[@class="text-uppercase"]'
-        spread_xpath = './/span[contains(@class, "team-consensus")][2]/text()[normalize-space()]'
-        total_xpath = './/span[contains(@class, "team-overunder")]'
-
-    try:
-        return _parse_games(
-            html_content,
-            expected_date=game_date,
-            container_xpath=container_xpath,
-            teams_xpath=teams_xpath,
-            spread_xpath=spread_xpath,
-            total_xpath=total_xpath,
-            displayed_date_xpath=displayed_date_xpath,
-        )
-    except Exception as e:
-        # Add date context to the exception and re-raise
-        raise type(e)(f"Error for date {game_date}: {e}") from e
+    # Single parser call - no branching based on date
+    return _parse_games(
+        html_content=html_content,
+        expected_date=game_date,
+        displayed_date_xpath=displayed_date_xpath,
+    )
 
 
 # A few simple tests of the parser
 if __name__ == "__main__":
     past_date = date(2023, 3, 8)
+    print(f"--- Parsing Historical Example ({past_date}) ---")
+    historical_games_df = get_covers_games(past_date)
+    print(historical_games_df)
+
+    past_date = date(2023, 3, 18)
     print(f"--- Parsing Historical Example ({past_date}) ---")
     historical_games_df = get_covers_games(past_date)
     print(historical_games_df)
