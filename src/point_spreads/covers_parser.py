@@ -1,7 +1,7 @@
 """Parser for Covers.com NCAA basketball HTML data."""
 
-from datetime import date, datetime
 import re
+from datetime import date, datetime
 from pathlib import Path
 
 import polars as pl
@@ -140,7 +140,8 @@ def _parse_games(
         match = re.search(r"[+-].*", spread_text)
         spread = match.group(0).upper() if match else spread_text.upper()
 
-        total_cleaned = total_text.lower().replace("o/u ", "").replace("under ", "").replace("over ", "")
+        total_cleaned = total_text.lower().replace("o/u ", "")
+        total_cleaned = total_cleaned.replace("under ", "").replace("over ", "")
 
         game_data = GameData(
             game_date=expected_date,
