@@ -90,7 +90,7 @@ MODEL_SETTINGS: ModelSettings = {
 
 # Define the calendar date parser agent
 calendar_parser_agent = Agent(
-    "google-gla:gemini-2.0-flash",
+    "google-gla:gemini-2.0-flash-lite",
     result_type=CalendarDate,
     model_settings=MODEL_SETTINGS,
     system_prompt="""
@@ -141,7 +141,7 @@ calendar_parser_agent = Agent(
 
 # Define the batch game box parser agent
 gamebox_batch_parser_agent = Agent(
-    "google-gla:gemini-2.0-flash",
+    "google-gla:gemini-2.0-flash-lite",
     result_type=GameDataList,
     model_settings=MODEL_SETTINGS,
     system_prompt="""
@@ -293,7 +293,6 @@ def _parse_games(
         # Add dates to each game and   for debugging
         for game_data in game_data_list.games:
             game_with_dates = GameDataWithDates(**game_data.model_dump(), game_date=expected_date, updated_date=today)
-            print(game_with_dates)
             games.append(game_with_dates)
 
     if not games:
@@ -316,6 +315,8 @@ def get_covers_games(game_date: date_type) -> pl.DataFrame:
 
 
 if __name__ == "__main__":
+    # TODO: manually evaluate parse the games for these days and eval the agent
+
     past_date = datetime.date(2023, 3, 8)
     print(f"--- Parsing Historical Example ({past_date}) ---")
     historical_games_df = get_covers_games(past_date)
