@@ -25,10 +25,10 @@ cache = FanoutCache(directory=str(cache_dir))
 GAME_DATA_SCHEMA = {
     "game_date": pl.Date,
     "updated_date": pl.Date,
-    "home_team": pl.Utf8,
-    "away_team": pl.Utf8,
-    "home_team_spread": pl.Utf8,
-    "away_team_spread": pl.Utf8,
+    "home_team.name": pl.Utf8,
+    "away_team.name": pl.Utf8,
+    "home_team.spread": pl.Utf8,
+    "away_team.spread": pl.Utf8,
     "total": pl.Utf8,
     "neutral_location": pl.Boolean,
     "tournament": pl.Utf8,
@@ -41,13 +41,18 @@ class CalendarDate(BaseModel):
     date: date_type = Field(description="The date extracted from the calendar navigation")
 
 
+class TeamData(BaseModel):
+    """Team data with name and spread."""
+
+    name: str = Field(description="Standardized team name without mascot")
+    spread: str = Field(description="Team's point spread (e.g., '-3.5' or '+3.5')")
+
+
 class GameData(BaseModel):
     """Fields to extract from game HTML - doesn't include dates which we already know."""
 
-    home_team: str = Field(description="Home team name (full name from header)")
-    away_team: str = Field(description="Away team name (full name from header)")
-    home_team_spread: str = Field(description="Spread for the home team (e.g., '-3.5' if home team is favorite)")
-    away_team_spread: str = Field(description="Spread for the away team (e.g., '+3.5' if away team is underdog)")
+    home_team: TeamData = Field(description="Home team data including name and spread")
+    away_team: TeamData = Field(description="Away team data including name and spread")
     total: str = Field(description="Over/under total points (just the number without 'o/u' prefix)")
     neutral_location: bool = Field(
         False, description="True if game is at a neutral location (indicated by '(N)' in header)"
@@ -55,9 +60,16 @@ class GameData(BaseModel):
     tournament: str = Field("", description="Tournament name if available (e.g., 'March Madness', 'Conf Tourn.')")
 
 
-class GameDataWithDates(GameData):
+class GameDataWithDates(BaseModel):
     """Complete game data including dates."""
 
+    home_team: TeamData = Field(description="Home team data including name and spread")
+    away_team: TeamData = Field(description="Away team data including name and spread")
+    total: str = Field(description="Over/under total points (just the number without 'o/u' prefix)")
+    neutral_location: bool = Field(
+        False, description="True if game is at a neutral location (indicated by '(N)' in header)"
+    )
+    tournament: str = Field("", description="Tournament name if available (e.g., 'March Madness', 'Conf Tourn.')")
     game_date: date_type = Field(description="Date of the game")
     updated_date: date_type = Field(description="Date when the data was last updated")
 
@@ -135,76 +147,40 @@ gamebox_batch_parser_agent = Agent(
     system_prompt="""
     You are a specialized parser for NCAA basketball game information from Covers.com HTML.
 
-    You will be given HTML content containing MULTIPLE game boxes. Parse ALL game boxes and return
-    a LIST of game data objects.
+    You will be given HTML content containing MULTIPLE game boxes separated by markers.
+    Parse each game box and return a LIST of game data objects.
 
-    For each game box, extract the following information:
-    1. Home team name - use ONLY the standardized school name WITHOUT the mascot
-       (e.g., "Western Carolina" not "Western Carolina Catamounts")
-    2. Away team name - use ONLY the standardized school name WITHOUT the mascot
-       (e.g., "Penn State" not "Penn St. Nittany Lions")
-    3. Home team spread - in the team's perspective
-       (e.g., "-3.5" if home team is favorite, "+3.5" if home team is underdog)
-    4. Away team spread - in the team's perspective
-       (e.g., "+3.5" if away team is underdog, "-3.5" if away team is favorite)
-    5. Total over/under points (as a string, just the number without "o/u" prefix)
-    6. Neutral location (boolean, true if "(N)" appears in the header)
-    7. Tournament name (if available, use empty string if none found)
+    For each game box, extract:
+    1. Teams - Standardized school names WITHOUT mascots (e.g., "Western Carolina" not "Catamounts")
+    2. Spreads - The specific spread value for each team (e.g., "-1", "+1")
+    3. Total - The over/under total points value
+    4. Location type - Whether the game is at a neutral location
+    5. Tournament - Any tournament name if available
 
-    TEAM NAME STANDARDIZATION RULES:
-    - Use the widely recognized, unambiguous name of the school
-    - Remove all mascot references (Wildcats, Eagles, Tigers, etc.)
-    - Use common full names instead of abbreviations (e.g., "Penn State" not "Penn St.")
-    - For "University of X", use the location name only if that's how the team is commonly known
-      (e.g., "Kentucky" for "University of Kentucky", but "Miami (FL)" for "University of Miami")
-    - Keep directional indicators if they're part of the school name (e.g., "Western Carolina", "North Carolina")
-    - Use standard abbreviations only if that's how the team is widely known (e.g., "UCLA", "USC", "UNLV")
-    - Use "(FL)" or "(OH)" suffixes to disambiguate schools with the same name in different states
-      (e.g., "Miami (FL)" vs "Miami (OH)")
+    CRITICAL: For spreads, identify which spread belongs to which team by examining the HTML structure.
+    DO NOT assume the home team always has a negative spread.
+    Look at which spread appears next to which team in the team-consensus spans.
 
-    EXAMPLES OF TEAM NAME STANDARDIZATION:
-    - "Western Carolina Catamounts" → "Western Carolina"
-    - "Penn St. Nittany Lions" → "Penn State"
-    - "North Alabama Lions" → "North Alabama"
-    - "Southern Utah Thunderbirds" → "Southern Utah"
-    - "University of Virginia Cavaliers" → "Virginia"
-    - "Ohio Bobcats" → "Ohio"
-    - "Oregon State Beavers" → "Oregon State"
-    - "Miami (FL) Hurricanes" → "Miami (FL)"
-    - "Miami (OH) RedHawks" → "Miami (OH)"
-    - "University of California Golden Bears" → "California"
-    - "University of California, Los Angeles Bruins" → "UCLA"
+    Example HTML spread identification:
+    ```html
+    <!-- AWAY TEAM area -->
+    <span class="team-consensus">
+        <strong>50%</strong> -1
+    </span>
 
-    For spreads, careful analysis is required:
+    <!-- HOME TEAM area -->
+    <span class="team-consensus">
+        +1 <strong>50%</strong>
+    </span>
+    ```
 
-    - If explicit spreads for both teams are visible, use those values directly.
-    - In historical (postgame) situations, carefully determine which team the spread applies to:
-      - Look for phrases like "covered the spread of", "failed to cover", "underdog" or "favorite"
-      - Determine which team (home or away) is being referenced
-      - Assign the appropriate spread to that team
-      - Calculate the opposite spread for the other team (if home is -3.5, away must be +3.5)
-    - In future game situations, the spread is typically shown from the home team's perspective
-      - If the home team has a negative spread (e.g., -3.5), they are favored
-      - If the home team has a positive spread (e.g., +3.5), they are the underdog
-      - The away team's spread will be the opposite (home -3.5 means away +3.5)
+    In this example, the away team's spread is "-1" and the home team's spread is "+1".
+    Look at where the spreads appear in relation to the team sections.
 
-    Examples for determining spreads:
-    1. "San Diego St covered the spread of -8.0" and San Diego St is the home team:
-       - home_team_spread = "-8.0", away_team_spread = "+8.0"
-    2. "Michigan State covered the spread of +5.5" and Michigan State is the away team:
-       - away_team_spread = "+5.5", home_team_spread = "-5.5"
-    3. "Favorite UConn failed to cover -12.5" and UConn is the home team:
-       - home_team_spread = "-12.5", away_team_spread = "+12.5"
-    4. Future game shows Houston -6.5 as the home team:
-       - home_team_spread = "-6.5", away_team_spread = "+6.5"
+    Team names should be standardized: remove mascots, use common full names,
+    and keep appropriate abbreviations (UCLA, USC) or state indicators (Miami (FL)).
 
-    IMPORTANT: Always ensure that the two spreads are opposites (if one is +3.5, the other must be -3.5).
-
-    Return values as strings for spreads and totals, maintaining the original format with signs.
-    If a value is unavailable, use a reasonable default or empty string.
-
-    RETURN FORMAT:
-    Return a list of game data objects. Each object should contain all the fields described above.
+    Return a list of objects with nested team data where each team has both a name and its specific spread.
     """,
 )
 
@@ -252,12 +228,6 @@ def download_covers_html(game_date: date_type) -> str:
 def extract_date_from_calendar(html_content: str) -> date_type:
     """
     Extract the displayed date from the calendar navigation using the AI agent.
-
-    Args:
-        html_content: HTML content as a string
-
-    Returns:
-        date object representing the date displayed on the page
     """
     tree = html.fromstring(html_content)
 
@@ -282,13 +252,6 @@ def _parse_games(
 ) -> pl.DataFrame:
     """
     Parse games from Covers.com HTML, handling both pre-game and post-game containers.
-
-    Args:
-        html_content: HTML content as a string.
-        expected_date: Date of the games.
-
-    Returns:
-        DataFrame containing game information.
     """
     # Extract the date from the calendar navigation
     page_date = extract_date_from_calendar(html_content)
@@ -310,24 +273,31 @@ def _parse_games(
     if not containers:
         return get_empty_dataframe()
 
-    # Instead of parsing each game individually, extract all container HTML at once
-    all_containers_html = ""
-    for i, container in enumerate(containers):
-        container_html = html.tostring(container, encoding="unicode")
-        all_containers_html += f"\n\n--- GAME BOX {i + 1} ---\n\n{container_html}"
-
-    # Get today's date for the updated_date field
+    # Process containers in batches to avoid overwhelming the model
+    batch_size = 5  # Process 5 games at a time
+    games: list[GameDataWithDates] = []
     today = datetime.date.today()
 
-    # Parse all game boxes at once
-    game_data_list = _run_agent_with_retry(gamebox_batch_parser_agent, all_containers_html)
-    games: list[GameDataWithDates] = []
+    # Process games in smaller batches
+    for i in range(0, len(containers), batch_size):
+        batch_containers = containers[i : i + batch_size]
+        all_containers_html = ""
 
-    # Add dates to each game and print for debugging
-    for game_data in game_data_list.games:
-        game_with_dates = GameDataWithDates(**game_data.model_dump(), game_date=expected_date, updated_date=today)
-        print(game_with_dates)
-        games.append(game_with_dates)
+        for j, container in enumerate(batch_containers):
+            container_html = html.tostring(container, encoding="unicode")
+            all_containers_html += f"\n\n--- GAME BOX {j + 1} ---\n\n{container_html}"
+
+        # Parse this batch of game boxes
+        game_data_list = _run_agent_with_retry(gamebox_batch_parser_agent, all_containers_html)
+
+        # Add dates to each game and   for debugging
+        for game_data in game_data_list.games:
+            game_with_dates = GameDataWithDates(**game_data.model_dump(), game_date=expected_date, updated_date=today)
+            print(game_with_dates)
+            games.append(game_with_dates)
+
+    if not games:
+        return get_empty_dataframe()
 
     return pl.DataFrame([game.model_dump() for game in games])
 
