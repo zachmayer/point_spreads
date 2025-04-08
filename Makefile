@@ -9,7 +9,7 @@ help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: all ## Run all commands
-all: install check test
+all: install check test test-parser-specific-days
 
 .PHONY: fmt
 fmt: ## Run ruff formatter on all Python files
@@ -23,15 +23,25 @@ lint: ## Run ruff linter with autofix (including unsafe fixes)
 types: ## Run pyright type checker in strict mode
 	uv run pyright $(SRC_DIR) $(TEST_DIR)
 
-.PHONY: test
+.PHONY:test
 test: ## Run pytest on all test files
 	uv run pytest $(TEST_DIR)
 
 .PHONY: check
 check: fmt lint types ## Run all checks (format, lint, type checking)
 
+.PHONY: setup-env
+setup-env: ## Set up .env file from .env.example if it doesn't exist
+	@if [ ! -f .env ]; then \
+		echo "Creating .env from .env.example"; \
+		cp .env.example .env; \
+		echo "⚠️  Please edit .env to set your API keys and preferences"; \
+	else \
+		echo "✅ .env file already exists"; \
+	fi
+
 .PHONY: install
-install: ## Set up the project with dependencies and pre-commit hooks
+install: setup-env ## Set up the project with dependencies and pre-commit hooks
 	uv sync --upgrade
 	uv run pre-commit autoupdate
 	uv run pre-commit install
@@ -40,6 +50,10 @@ install: ## Set up the project with dependencies and pre-commit hooks
 .PHONY: install-ci
 install-ci: ## Install dependencies from the lockfile for CI
 	uv sync --frozen
+
+.PHONY: test-parser-specific-days
+test-parser-specific-days: ## Run covers_parser module as integration test
+	uv run -m point_spreads.covers_parser
 
 .PHONY: update-games
 update-games: ## Update basketball game data from Covers.com
