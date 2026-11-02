@@ -29,5 +29,5 @@ updates:
         patterns:
           - "*" 
     commit-message:
-      prefix: 'python'
+      prefix: 'ci'
       include: 'scope'

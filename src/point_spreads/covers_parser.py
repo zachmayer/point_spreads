@@ -5,7 +5,7 @@ from pathlib import Path
 
 import polars as pl
 import requests
-from diskcache import FanoutCache  # type: ignore
+from diskcache import FanoutCache
 from lxml import html
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_random_exponential

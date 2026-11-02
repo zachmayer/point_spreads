@@ -20,8 +20,8 @@ lint: ## Run ruff linter with autofix (including unsafe fixes)
 	uv run ruff check --fix --unsafe-fixes $(SRC_DIR) $(TEST_DIR)
 
 .PHONY: types
-types: ## Run pyright type checker in strict mode
-	uv run pyright $(SRC_DIR) $(TEST_DIR)
+types: ## Run ty type checker (warnings fail)
+	uv run ty check $(SRC_DIR) $(TEST_DIR)
 
 .PHONY: test
 test: ## Run pytest on all test files
