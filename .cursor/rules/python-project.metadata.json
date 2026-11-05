@@ -1,5 +1,0 @@
-{
-  "description": "Guidelines for Python development using uv for package management and command execution",
-  "patterns": ["**/*.py", "pyproject.toml", "Makefile", "requirements*.txt"],
-  "priority": 100
-} 
