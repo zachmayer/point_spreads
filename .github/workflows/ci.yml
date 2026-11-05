@@ -17,7 +17,17 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      
+
+      # https://docs.zizmor.sh
+      # Audits every workflow in the repo and dependabot.yml for security
+      # flaws. The action pins zizmor itself, so new rules arrive only with a
+      # Dependabot bump, which merges only once they pass.
+      - uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+        with:
+          min-severity: medium
+          advanced-security: false
+          annotations: true
+
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
@@ -36,3 +46,23 @@ jobs:
 
       - name: Run tests
         run: make test
+
+  # Dependabot's PRs merge themselves. This job checks nothing out, so the PR's
+  # code never runs with this write token, and --match-head-commit refuses a
+  # head that moved after this run saw it.
+  merge-dependabot:
+    needs: [build]
+    # Only someone with write access can push to Dependabot's branch, and they
+    # can push to main anyway. Accepted: reopening a closed Dependabot PR, which
+    # Triage allows, gets it merged once the checks pass.
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - run: gh pr merge --squash --match-head-commit "$PR_HEAD_SHA" "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}

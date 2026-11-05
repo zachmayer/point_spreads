@@ -38,8 +38,8 @@ install: ## Set up the project with dependencies and pre-commit hooks
 	uv run pre-commit install --hook-type pre-push
 
 .PHONY: install-ci
-install-ci: ## Install dependencies from the lockfile for CI
-	uv sync --frozen
+install-ci: ## Install dependencies from the lockfile for CI; fails if uv.lock is stale
+	uv sync --locked
 
 .PHONY: update-games
 update-games: ## Update basketball game data from Covers.com

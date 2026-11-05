@@ -1,19 +1,18 @@
 """Parser for Covers.com NCAA basketball HTML data."""
 
+import time
 from datetime import date, datetime
 from pathlib import Path
 
 import polars as pl
 import requests
-from diskcache import FanoutCache
 from lxml import html
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
-# Create a cache with unlimited size in the project root directory
-cache_dir = Path(__file__).parent.parent.parent / ".cache"
-cache_dir.mkdir(exist_ok=True)
-cache = FanoutCache(directory=str(cache_dir))
+# Downloaded pages, one HTML file per date, under the project root's .cache directory
+CACHE_DIR = Path(__file__).parent.parent.parent / ".cache" / "covers_html"
+CACHE_TTL_SECONDS = 60 * 60 * 24
 
 
 # Define the schema for game data - this can be imported by other modules
@@ -43,17 +42,25 @@ def get_empty_dataframe() -> pl.DataFrame:
 
 
 @retry(wait=wait_random_exponential(multiplier=1, max=60), stop=stop_after_attempt(5))
-@cache.memoize(typed=True, expire=60 * 60 * 24, tag="html")
 def download_covers_html(game_date: date) -> str:
     """
-    Download Covers.com HTML for a specific date.
+    Download Covers.com HTML for a specific date, reusing a cached copy under 24 hours old.
+    Failed downloads are not cached, so each retry fetches again.
     """
     date_str = game_date.strftime("%Y-%m-%d")
-    url = f"https://www.covers.com/Sports/NCAAB/Matchups?selectedDate={date_str}"
+    cache_path = CACHE_DIR / f"{date_str}.html"
+    if cache_path.exists() and time.time() - cache_path.stat().st_mtime < CACHE_TTL_SECONDS:
+        return cache_path.read_text(encoding="utf-8")
 
+    url = f"https://www.covers.com/Sports/NCAAB/Matchups?selectedDate={date_str}"
     response = requests.get(url)
     response.raise_for_status()
 
+    # Write then rename, so an interrupted write never leaves a truncated page that reads as fresh
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = cache_path.with_suffix(".tmp")
+    tmp_path.write_text(response.text, encoding="utf-8")
+    tmp_path.replace(cache_path)
     return response.text
 
 

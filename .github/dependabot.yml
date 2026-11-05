@@ -1,13 +1,23 @@
+# Weekly version updates, grouped into one PR per ecosystem: uv.lock and the SHA-pinned actions.
+# Cooldown: a release waits 7 days before a version update proposes it, time
+# for a compromised release to be caught and yanked. Security updates skip it.
+# The merge-dependabot job in .github/workflows/ci.yml squash-merges each PR once its checks pass.
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
 version: 2
 updates:
   # Python dependencies
-  - package-ecosystem: "pip"
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
     cooldown:
       default-days: 7
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 1
+    # Indirect dependencies too: by default version updates move only the
+    # direct ones, so a package pulled in by another sits until a security alert.
+    allow:
+      - dependency-type: "all"
     groups:
       python-packages:
         patterns:
@@ -15,7 +25,7 @@ updates:
     commit-message:
       prefix: 'python'
       include: 'scope'
-    
+
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -27,7 +37,7 @@ updates:
     groups:
       github-actions:
         patterns:
-          - "*" 
+          - "*"
     commit-message:
       prefix: 'ci'
       include: 'scope'
