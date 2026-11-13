@@ -11,8 +11,7 @@ workflows:
         - 'actions/setup-python@v7.1.0'
         - 'astral-sh/setup-uv@v10.3.3'
         - 'zizmorcore/zizmor-action@v0.8.1'
-    '.github/workflows/verify-lockfile.yml':
-        - 'actions/checkout@v7.0.1'
+    '.github/workflows/verify-lockfile.yml': []
 dependencies:
     'actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae':
         ref: 'v5.0.5'
